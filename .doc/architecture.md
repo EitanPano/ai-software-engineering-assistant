@@ -169,9 +169,8 @@ eval runs exercise the real model.
   (`memory`, `pubsub` and `scheduler` in the template, plus the database resource when a
   provider was chosen at the bootstrap; one ping round in flight at a
   time, the answer reused for a second) and answers 503 with the per-dependency map under
-  `dependencies` when one is down. Nothing in the shipped compose file reads it; a
-  `HEALTHCHECK` or a compose `healthcheck` that points at it is the data-layer task's or
-  the deployment's to add.
+  `dependencies` when one is down. The `backend` Compose service's `healthcheck` reads it, so
+  `docker compose --profile app up --wait` returns only once the server answers.
 - Startup and shutdown: the server's entry file calls `connectAll` (bounded retry)
   before it listens (a dependency that never comes up stops the process with exit code 1);
   on `SIGTERM` or `SIGINT` it stops accepting requests, runs `disconnectAll` in reverse
@@ -195,4 +194,6 @@ eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-30: the `backend` Compose service gains a healthcheck on `/api/health/ready`; CI runs
+  `verify`, a production-image start and a secret scan on every push.
 - 2026-10-30: initial architecture accepted; react-python-fastapi, deploy single, Postgres 17.

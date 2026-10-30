@@ -35,6 +35,16 @@ services:
     # false no caller can choose its own client IP through X-Forwarded-For.
     ports: [ "8000:8000" ]
     profiles: [ "app" ]
+    # Without this, `up --wait` returns when the container starts, before uvicorn binds the port:
+    # it binds only after the lifespan connects every dependency. Every probe is a request-log
+    # line, so it polls fast while starting and slowly afterwards.
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=2)" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
     depends_on:
       database:
         condition: service_healthy
