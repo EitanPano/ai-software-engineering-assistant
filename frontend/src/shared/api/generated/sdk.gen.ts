@@ -10,9 +10,6 @@ import type {
 } from './client'
 import { client } from './client.gen'
 import type {
-  DeleteApiModuleByIdData,
-  DeleteApiModuleByIdErrors,
-  DeleteApiModuleByIdResponses,
   GetApiConversationByIdData,
   GetApiConversationByIdErrors,
   GetApiConversationByIdMessageData,
@@ -28,12 +25,6 @@ import type {
   GetApiHealthReadyErrors,
   GetApiHealthReadyResponses,
   GetApiHealthResponses,
-  GetApiModuleByIdData,
-  GetApiModuleByIdErrors,
-  GetApiModuleByIdResponses,
-  GetApiModuleData,
-  GetApiModuleErrors,
-  GetApiModuleResponses,
   GetApiRunByIdEventData,
   GetApiRunByIdEventErrors,
   GetApiRunByIdEventResponse,
@@ -47,9 +38,6 @@ import type {
   GetApiUserMeErrors,
   GetApiUserMeResponses,
   GetApiUserResponses,
-  PatchApiModuleByIdData,
-  PatchApiModuleByIdErrors,
-  PatchApiModuleByIdResponses,
   PatchApiUserMeData,
   PatchApiUserMeErrors,
   PatchApiUserMeResponses,
@@ -77,9 +65,6 @@ import type {
   PostApiConversationData,
   PostApiConversationErrors,
   PostApiConversationResponses,
-  PostApiModuleData,
-  PostApiModuleErrors,
-  PostApiModuleResponses,
 } from './types.gen'
 
 export type Options<
@@ -281,74 +266,6 @@ export const getApiUserById = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetApiUserByIdResponses, GetApiUserByIdErrors, ThrowOnError>({
     url: '/api/user/{id}',
     ...options,
-  })
-
-/**
- * List modules
- */
-export const getApiModule = <ThrowOnError extends boolean = false>(
-  options?: Options<GetApiModuleData, ThrowOnError>,
-): RequestResult<GetApiModuleResponses, GetApiModuleErrors, ThrowOnError> =>
-  (options?.client ?? client).get<GetApiModuleResponses, GetApiModuleErrors, ThrowOnError>({
-    url: '/api/module',
-    ...options,
-  })
-
-/**
- * Create a module
- */
-export const postApiModule = <ThrowOnError extends boolean = false>(
-  options?: Options<PostApiModuleData, ThrowOnError>,
-): RequestResult<PostApiModuleResponses, PostApiModuleErrors, ThrowOnError> =>
-  (options?.client ?? client).post<PostApiModuleResponses, PostApiModuleErrors, ThrowOnError>({
-    url: '/api/module',
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
-
-/**
- * Delete a module (admin only)
- */
-export const deleteApiModuleById = <ThrowOnError extends boolean = false>(
-  options: Options<DeleteApiModuleByIdData, ThrowOnError>,
-): RequestResult<DeleteApiModuleByIdResponses, DeleteApiModuleByIdErrors, ThrowOnError> =>
-  (options.client ?? client).delete<
-    DeleteApiModuleByIdResponses,
-    DeleteApiModuleByIdErrors,
-    ThrowOnError
-  >({ url: '/api/module/{id}', ...options })
-
-/**
- * Get a module
- */
-export const getApiModuleById = <ThrowOnError extends boolean = false>(
-  options: Options<GetApiModuleByIdData, ThrowOnError>,
-): RequestResult<GetApiModuleByIdResponses, GetApiModuleByIdErrors, ThrowOnError> =>
-  (options.client ?? client).get<GetApiModuleByIdResponses, GetApiModuleByIdErrors, ThrowOnError>({
-    url: '/api/module/{id}',
-    ...options,
-  })
-
-/**
- * Update a module
- */
-export const patchApiModuleById = <ThrowOnError extends boolean = false>(
-  options: Options<PatchApiModuleByIdData, ThrowOnError>,
-): RequestResult<PatchApiModuleByIdResponses, PatchApiModuleByIdErrors, ThrowOnError> =>
-  (options.client ?? client).patch<
-    PatchApiModuleByIdResponses,
-    PatchApiModuleByIdErrors,
-    ThrowOnError
-  >({
-    url: '/api/module/{id}',
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
   })
 
 /**

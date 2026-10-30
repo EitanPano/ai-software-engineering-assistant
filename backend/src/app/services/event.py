@@ -1,9 +1,9 @@
 """Typed access to the event bus. Add an event by adding a `Topic` constant with its payload type;
-publish from a controller after its write (`api/module/` is the example); a reaction is a file in
-`infra/subscribers/` listed in `infra/pubsub.py`. `publish` returns once the handlers are
-scheduled, not finished: a reaction is detached from the publisher by construction, and a failing
-or slow one never reaches it. A test (or shutdown) that needs the reaction's effect awaits
-`drain()`.
+publish from a controller after its write (`api/user/` and `api/conversation/` are the examples);
+a reaction is a file in `infra/subscribers/` listed in `infra/pubsub.py`. `publish` returns once
+the handlers are scheduled, not finished: a reaction is detached from the publisher by
+construction, and a failing or slow one never reaches it. A test (or shutdown) that needs the
+reaction's effect awaits `drain()`.
 """
 
 from collections.abc import Awaitable, Callable, Coroutine
@@ -13,10 +13,8 @@ from typing import Final, TypedDict, cast
 from app.infra.pubsub import SubscriberEntry, Unsubscribe, pubsub
 
 __all__ = [
-    "MODULE_CREATED",
     "RUN_CREATED",
     "USER_REGISTERED",
-    "ModuleCreated",
     "RunCreated",
     "Topic",
     "Unsubscribe",
@@ -35,13 +33,6 @@ class Topic[P]:
     disagree about it."""
 
     name: str
-
-
-class ModuleCreated(TypedDict):
-    module_id: str
-
-
-MODULE_CREATED: Final = Topic[ModuleCreated]("module.created")
 
 
 class UserRegistered(TypedDict):

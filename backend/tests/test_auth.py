@@ -174,6 +174,24 @@ class TestRegister:
         assert access["samesite"].lower() == "lax"
         assert refresh["samesite"].lower() == "lax"
 
+    async def test_ignores_a_forged_role_status_and_id(self, client: httpx.AsyncClient) -> None:
+        res = await client.post(
+            "/api/auth/register",
+            json={
+                "email": "forger@example.com",
+                "password": PASSWORD,
+                "role": "admin",
+                "status": "blocked",
+                "id": "mine",
+            },
+        )
+
+        assert res.status_code == 201
+        account = res.json()["user"]
+        assert account["role"] == "user"
+        assert account["status"] == "active"
+        assert account["id"] != "mine"
+
     async def test_answers_409_for_a_duplicate_email(self, client: httpx.AsyncClient) -> None:
         await register(client, "ada@example.com")
 

@@ -11,7 +11,6 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | caller | The authenticated principal on a request: `{ id, role, sessionId }` | the resolved caller |
 | OTP | A six-digit one-time code sent to a target; valid 10 min, 5 attempts | module `auth` |
 | target | An email or phone a message or OTP is sent to: `{ type, value }` | OTP endpoints, the user entity's public type (`ContactTarget`); the communicate layer calls the address `to` |
-| module (reference) | The shipped CRUD module `api/module/` that a developer copies | `api/module/`, `models/module/` |
 | user | A person with an account, role `user` or `admin` | table `user`, route `/api/user`, module `user` |
 | conversation | One chat thread owned by a user; never called a session, which is a refresh-token record | table `conversation`, route `/api/conversation`, module `conversation` |
 | message | One turn in a conversation; together they are its conversation history. Roles: `user`, `assistant` and `tool_result`, which the API receives as `user` and the wire never shows | table `message` |

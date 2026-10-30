@@ -18,8 +18,8 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] drop the reference module
-- [ ] user can connect a GitHub repository to the knowledge base
+- [ ] move the database to Postgres 18 with pgvector and add grant_admin | stack:backend
+- [ ] admin can connect a GitHub repository to the knowledge base
 - [ ] user can search the knowledge base with hybrid search
 - [ ] admin can measure retrieval quality with an eval run
 - [ ] agent searches the knowledge base through our MCP server
@@ -33,9 +33,14 @@ Example: `- [ ] user can sign in with email`
 - [ ] user can stop a running agent
 - [ ] user can load earlier messages in a conversation
 - [ ] user can see a finished run's tool calls after a reload
+- [ ] admin can connect a private GitHub repository
+- [ ] admin can re-index a connected source
+- [ ] admin can remove a source
+- [ ] connect is rate limited per admin
 
 ## DONE
 
 <!-- moved here by the dev loop with the date and the plan number -->
 
 - [x] user can chat with the agent and watch the response stream (2026-10-30, plan 001)
+- [x] drop the reference module (2026-10-30, plan 002)

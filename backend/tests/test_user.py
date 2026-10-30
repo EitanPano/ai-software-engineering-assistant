@@ -283,6 +283,40 @@ class TestListUser:
             "admin@example.com"
         ]
 
+    @pytest.mark.parametrize("limit", ["0", "101", "x", "-1", "1.5"])
+    async def test_rejects_a_limit_out_of_bounds_naming_the_query(
+        self, client: httpx.AsyncClient, limit: str
+    ) -> None:
+        headers = bearer(await admin())
+
+        res = await client.get("/api/user", params={"limit": limit}, headers=headers)
+
+        assert res.status_code == 400
+        error = res.json()["error"]
+        assert error["message"] == "invalid query"
+        assert error["details"][0]["path"] == "limit"
+
+    async def test_answers_a_trailing_slash_as_not_found_never_a_redirect(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        res = await client.get("/api/user/", headers=bearer(await admin()))
+
+        assert res.status_code == 404
+        assert "location" not in res.headers
+        assert error_of(res).code == "not_found"
+
+    async def test_answers_403_for_a_user_caller_whose_query_is_also_invalid(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        account = await make_user("a@example.com")
+
+        res = await client.get("/api/user?cursor=nope&limit=0", headers=bearer(account))
+
+        assert res.status_code == 403
+
+    async def test_head_is_gated_like_get(self, client: httpx.AsyncClient) -> None:
+        assert (await client.head("/api/user")).status_code == 401
+
 
 class TestGetUser:
     async def test_answers_404_for_an_unknown_id(self, client: httpx.AsyncClient) -> None:

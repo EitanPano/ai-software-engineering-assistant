@@ -83,13 +83,6 @@ export type ConversationPage = {
 }
 
 /**
- * CreateModuleBody
- */
-export type CreateModuleBody = {
-  name: string
-}
-
-/**
  * Credentials
  */
 export type Credentials = {
@@ -187,37 +180,6 @@ export type MessagePage = {
    * Items
    */
   items: Array<Message>
-  /**
-   * Nextcursor
-   */
-  nextCursor: string | null
-}
-
-/**
- * Module
- */
-export type Module = {
-  /**
-   * Id
-   */
-  id: string
-  /**
-   * Name
-   */
-  name: string
-  status: 'active' | 'archived'
-  createdAt: string
-  updatedAt: string
-}
-
-/**
- * ModulePage
- */
-export type ModulePage = {
-  /**
-   * Items
-   */
-  items: Array<Module>
   /**
    * Nextcursor
    */
@@ -466,14 +428,6 @@ export type SentMessage = {
  */
 export type UpdateMeBody = {
   phone?: string | null
-}
-
-/**
- * UpdateModuleBody
- */
-export type UpdateModuleBody = {
-  name?: string
-  status?: 'active' | 'archived'
 }
 
 /**
@@ -935,205 +889,6 @@ export type GetApiUserByIdResponses = {
 }
 
 export type GetApiUserByIdResponse = GetApiUserByIdResponses[keyof GetApiUserByIdResponses]
-
-export type GetApiModuleData = {
-  body?: never
-  path?: never
-  query?: {
-    /**
-     * Cursor
-     */
-    cursor?: string
-    /**
-     * Limit
-     */
-    limit?: number
-  }
-  url: '/api/module'
-}
-
-export type GetApiModuleErrors = {
-  /**
-   * Validation failed
-   */
-  400: ErrorBody
-  /**
-   * Unexpected error
-   */
-  500: ErrorBody
-}
-
-export type GetApiModuleError = GetApiModuleErrors[keyof GetApiModuleErrors]
-
-export type GetApiModuleResponses = {
-  /**
-   * A page of modules
-   */
-  200: ModulePage
-}
-
-export type GetApiModuleResponse = GetApiModuleResponses[keyof GetApiModuleResponses]
-
-export type PostApiModuleData = {
-  body?: CreateModuleBody
-  path?: never
-  query?: never
-  url: '/api/module'
-}
-
-export type PostApiModuleErrors = {
-  /**
-   * Validation failed
-   */
-  400: ErrorBody
-  /**
-   * Unauthenticated
-   */
-  401: ErrorBody
-  /**
-   * Unexpected error
-   */
-  500: ErrorBody
-}
-
-export type PostApiModuleError = PostApiModuleErrors[keyof PostApiModuleErrors]
-
-export type PostApiModuleResponses = {
-  /**
-   * The created module
-   */
-  201: Module
-}
-
-export type PostApiModuleResponse = PostApiModuleResponses[keyof PostApiModuleResponses]
-
-export type DeleteApiModuleByIdData = {
-  body?: never
-  path: {
-    /**
-     * Id
-     */
-    id: string
-  }
-  query?: never
-  url: '/api/module/{id}'
-}
-
-export type DeleteApiModuleByIdErrors = {
-  /**
-   * Validation failed
-   */
-  400: ErrorBody
-  /**
-   * Unauthenticated
-   */
-  401: ErrorBody
-  /**
-   * Forbidden
-   */
-  403: ErrorBody
-  /**
-   * Not found
-   */
-  404: ErrorBody
-  /**
-   * Unexpected error
-   */
-  500: ErrorBody
-}
-
-export type DeleteApiModuleByIdError = DeleteApiModuleByIdErrors[keyof DeleteApiModuleByIdErrors]
-
-export type DeleteApiModuleByIdResponses = {
-  /**
-   * Deleted
-   */
-  204: void
-}
-
-export type DeleteApiModuleByIdResponse =
-  DeleteApiModuleByIdResponses[keyof DeleteApiModuleByIdResponses]
-
-export type GetApiModuleByIdData = {
-  body?: never
-  path: {
-    /**
-     * Id
-     */
-    id: string
-  }
-  query?: never
-  url: '/api/module/{id}'
-}
-
-export type GetApiModuleByIdErrors = {
-  /**
-   * Validation failed
-   */
-  400: ErrorBody
-  /**
-   * Not found
-   */
-  404: ErrorBody
-  /**
-   * Unexpected error
-   */
-  500: ErrorBody
-}
-
-export type GetApiModuleByIdError = GetApiModuleByIdErrors[keyof GetApiModuleByIdErrors]
-
-export type GetApiModuleByIdResponses = {
-  /**
-   * The module
-   */
-  200: Module
-}
-
-export type GetApiModuleByIdResponse = GetApiModuleByIdResponses[keyof GetApiModuleByIdResponses]
-
-export type PatchApiModuleByIdData = {
-  body?: UpdateModuleBody
-  path: {
-    /**
-     * Id
-     */
-    id: string
-  }
-  query?: never
-  url: '/api/module/{id}'
-}
-
-export type PatchApiModuleByIdErrors = {
-  /**
-   * Validation failed
-   */
-  400: ErrorBody
-  /**
-   * Unauthenticated
-   */
-  401: ErrorBody
-  /**
-   * Not found
-   */
-  404: ErrorBody
-  /**
-   * Unexpected error
-   */
-  500: ErrorBody
-}
-
-export type PatchApiModuleByIdError = PatchApiModuleByIdErrors[keyof PatchApiModuleByIdErrors]
-
-export type PatchApiModuleByIdResponses = {
-  /**
-   * The updated module
-   */
-  200: Module
-}
-
-export type PatchApiModuleByIdResponse =
-  PatchApiModuleByIdResponses[keyof PatchApiModuleByIdResponses]
 
 export type GetApiConversationData = {
   body?: never

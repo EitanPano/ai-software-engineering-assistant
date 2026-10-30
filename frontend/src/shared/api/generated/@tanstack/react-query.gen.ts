@@ -4,19 +4,15 @@ import { queryOptions, type UseMutationOptions } from '@tanstack/react-query'
 
 import { client } from '../client.gen'
 import {
-  deleteApiModuleById,
   getApiConversation,
   getApiConversationById,
   getApiConversationByIdMessage,
   getApiHealth,
   getApiHealthReady,
-  getApiModule,
-  getApiModuleById,
   getApiUser,
   getApiUserById,
   getApiUserMe,
   type Options,
-  patchApiModuleById,
   patchApiUserMe,
   postApiAuthLogin,
   postApiAuthLogout,
@@ -26,12 +22,8 @@ import {
   postApiAuthRegister,
   postApiConversation,
   postApiConversationByIdMessage,
-  postApiModule,
 } from '../sdk.gen'
 import type {
-  DeleteApiModuleByIdData,
-  DeleteApiModuleByIdError,
-  DeleteApiModuleByIdResponse,
   GetApiConversationByIdData,
   GetApiConversationByIdError,
   GetApiConversationByIdMessageData,
@@ -47,12 +39,6 @@ import type {
   GetApiHealthReadyError,
   GetApiHealthReadyResponse,
   GetApiHealthResponse,
-  GetApiModuleByIdData,
-  GetApiModuleByIdError,
-  GetApiModuleByIdResponse,
-  GetApiModuleData,
-  GetApiModuleError,
-  GetApiModuleResponse,
   GetApiUserByIdData,
   GetApiUserByIdError,
   GetApiUserByIdResponse,
@@ -62,9 +48,6 @@ import type {
   GetApiUserMeError,
   GetApiUserMeResponse,
   GetApiUserResponse,
-  PatchApiModuleByIdData,
-  PatchApiModuleByIdError,
-  PatchApiModuleByIdResponse,
   PatchApiUserMeData,
   PatchApiUserMeError,
   PatchApiUserMeResponse,
@@ -92,9 +75,6 @@ import type {
   PostApiConversationData,
   PostApiConversationError,
   PostApiConversationResponse,
-  PostApiModuleData,
-  PostApiModuleError,
-  PostApiModuleResponse,
 } from '../types.gen'
 
 export type QueryKey<TOptions extends Options> = [
@@ -441,133 +421,6 @@ export const getApiUserByIdOptions = (options: Options<GetApiUserByIdData>) =>
     },
     queryKey: getApiUserByIdQueryKey(options),
   })
-
-export const getApiModuleQueryKey = (options?: Options<GetApiModuleData>) =>
-  createQueryKey('getApiModule', options)
-
-/**
- * List modules
- */
-export const getApiModuleOptions = (options?: Options<GetApiModuleData>) =>
-  queryOptions<
-    GetApiModuleResponse,
-    GetApiModuleError,
-    GetApiModuleResponse,
-    ReturnType<typeof getApiModuleQueryKey>
-  >({
-    queryFn: async ({ queryKey, signal }) => {
-      const { data } = await getApiModule({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true,
-      })
-      return data
-    },
-    queryKey: getApiModuleQueryKey(options),
-  })
-
-/**
- * Create a module
- */
-export const postApiModuleMutation = (
-  options?: Partial<Options<PostApiModuleData>>,
-): UseMutationOptions<PostApiModuleResponse, PostApiModuleError, Options<PostApiModuleData>> => {
-  const mutationOptions: UseMutationOptions<
-    PostApiModuleResponse,
-    PostApiModuleError,
-    Options<PostApiModuleData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await postApiModule({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
-
-/**
- * Delete a module (admin only)
- */
-export const deleteApiModuleByIdMutation = (
-  options?: Partial<Options<DeleteApiModuleByIdData>>,
-): UseMutationOptions<
-  DeleteApiModuleByIdResponse,
-  DeleteApiModuleByIdError,
-  Options<DeleteApiModuleByIdData>
-> => {
-  const mutationOptions: UseMutationOptions<
-    DeleteApiModuleByIdResponse,
-    DeleteApiModuleByIdError,
-    Options<DeleteApiModuleByIdData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await deleteApiModuleById({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
-
-export const getApiModuleByIdQueryKey = (options: Options<GetApiModuleByIdData>) =>
-  createQueryKey('getApiModuleById', options)
-
-/**
- * Get a module
- */
-export const getApiModuleByIdOptions = (options: Options<GetApiModuleByIdData>) =>
-  queryOptions<
-    GetApiModuleByIdResponse,
-    GetApiModuleByIdError,
-    GetApiModuleByIdResponse,
-    ReturnType<typeof getApiModuleByIdQueryKey>
-  >({
-    queryFn: async ({ queryKey, signal }) => {
-      const { data } = await getApiModuleById({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true,
-      })
-      return data
-    },
-    queryKey: getApiModuleByIdQueryKey(options),
-  })
-
-/**
- * Update a module
- */
-export const patchApiModuleByIdMutation = (
-  options?: Partial<Options<PatchApiModuleByIdData>>,
-): UseMutationOptions<
-  PatchApiModuleByIdResponse,
-  PatchApiModuleByIdError,
-  Options<PatchApiModuleByIdData>
-> => {
-  const mutationOptions: UseMutationOptions<
-    PatchApiModuleByIdResponse,
-    PatchApiModuleByIdError,
-    Options<PatchApiModuleByIdData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await patchApiModuleById({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
 
 export const getApiConversationQueryKey = (options?: Options<GetApiConversationData>) =>
   createQueryKey('getApiConversation', options)

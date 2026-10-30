@@ -1,18 +1,26 @@
 import inspect
 from collections.abc import Iterator
+from typing import Final, TypedDict
 
 import pytest
 
 from app.infra.pubsub import SubscriberEntry
 from app.services.event import (
-    MODULE_CREATED,
-    ModuleCreated,
+    Topic,
     Unsubscribe,
     drain,
     publish,
     subscribe,
     subscriber,
 )
+
+
+class Pinged(TypedDict):
+    ping_id: str
+
+
+# Test-local, so no product subscriber is registered on it.
+PINGED: Final = Topic[Pinged]("test.pinged")
 
 
 @pytest.fixture
@@ -30,12 +38,12 @@ class TestEvent:
     ) -> None:
         seen: list[str] = []
 
-        def on_created(payload: ModuleCreated) -> None:
-            seen.append(payload["module_id"])
+        def on_pinged(payload: Pinged) -> None:
+            seen.append(payload["ping_id"])
 
-        cleanups.append(subscribe(MODULE_CREATED, on_created))
+        cleanups.append(subscribe(PINGED, on_pinged))
 
-        await publish(MODULE_CREATED, {"module_id": "m1"})
+        await publish(PINGED, {"ping_id": "m1"})
         await drain()
 
         assert seen == ["m1"]
@@ -45,17 +53,17 @@ class TestEvent:
     ) -> None:
         ran = False
 
-        def raises(_: ModuleCreated) -> None:
+        def raises(_: Pinged) -> None:
             raise RuntimeError("boom")
 
-        def survives(_: ModuleCreated) -> None:
+        def survives(_: Pinged) -> None:
             nonlocal ran
             ran = True
 
-        cleanups.append(subscribe(MODULE_CREATED, raises))
-        cleanups.append(subscribe(MODULE_CREATED, survives))
+        cleanups.append(subscribe(PINGED, raises))
+        cleanups.append(subscribe(PINGED, survives))
 
-        await publish(MODULE_CREATED, {"module_id": "m2"})
+        await publish(PINGED, {"ping_id": "m2"})
         await drain()
 
         assert ran is True
@@ -63,14 +71,14 @@ class TestEvent:
     async def test_stops_delivering_after_unsubscribe(self) -> None:
         calls = 0
 
-        def count(_: ModuleCreated) -> None:
+        def count(_: Pinged) -> None:
             nonlocal calls
             calls += 1
 
-        unsubscribe = subscribe(MODULE_CREATED, count)
+        unsubscribe = subscribe(PINGED, count)
 
         unsubscribe()
-        await publish(MODULE_CREATED, {"module_id": "m3"})
+        await publish(PINGED, {"ping_id": "m3"})
         await drain()
 
         assert calls == 0
@@ -78,12 +86,12 @@ class TestEvent:
     async def test_subscribes_an_async_handler(self, cleanups: list[Unsubscribe]) -> None:
         seen: list[str] = []
 
-        async def on_created(payload: ModuleCreated) -> None:
-            seen.append(payload["module_id"])
+        async def on_pinged(payload: Pinged) -> None:
+            seen.append(payload["ping_id"])
 
-        cleanups.append(subscribe(MODULE_CREATED, on_created))
+        cleanups.append(subscribe(PINGED, on_pinged))
 
-        await publish(MODULE_CREATED, {"module_id": "m4"})
+        await publish(PINGED, {"ping_id": "m4"})
         await drain()
 
         assert seen == ["m4"]
@@ -93,14 +101,14 @@ class TestSubscriberEntry:
     async def test_makes_a_typed_entry_for_the_bus_to_register_on_connect(self) -> None:
         seen: list[str] = []
 
-        async def on_created(payload: ModuleCreated) -> None:
-            seen.append(payload["module_id"])
+        async def on_pinged(payload: Pinged) -> None:
+            seen.append(payload["ping_id"])
 
-        entry = subscriber(MODULE_CREATED, on_created)
+        entry = subscriber(PINGED, on_pinged)
 
         assert isinstance(entry, SubscriberEntry)
-        assert entry.topic == "module.created"
-        result = entry.handle({"module_id": "m5"})
+        assert entry.topic == "test.pinged"
+        result = entry.handle({"ping_id": "m5"})
         assert inspect.isawaitable(result)
         await result
         assert seen == ["m5"]

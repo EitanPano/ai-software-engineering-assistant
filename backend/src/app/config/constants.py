@@ -41,7 +41,6 @@ class RateLimits:
     otp_per_ip: RateLimit
     otp_per_target: RateLimit
     otp_verification_per_ip: RateLimit
-    create_post_per_ip: RateLimit
     message_per_user: RateLimit
     run_stream_per_user: RateLimit
 
@@ -54,7 +53,6 @@ RATE_LIMITS: Final = RateLimits(
     otp_per_ip=RateLimit(limit=10, window="1h"),
     otp_per_target=RateLimit(limit=5, window="1h"),
     otp_verification_per_ip=RateLimit(limit=20, window="15m"),
-    create_post_per_ip=RateLimit(limit=30, window="15m"),
     message_per_user=RateLimit(limit=30, window="15m"),
     # Opens, not streams: a client reopens a long run about once a minute (the lifetime below), and
     # 30 sends need at least 30 opens. Opens per window times the lifetime caps the streams one

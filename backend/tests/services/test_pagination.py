@@ -25,7 +25,7 @@ class Row:
 
 
 class Numbers(Page[int]):
-    """A concrete page, as a module declares its own (`ModulePage(Page[Module])`)."""
+    """A concrete page, as a module declares its own (`ConversationPage(Page[Conversation])`)."""
 
 
 class TestPageQuery:

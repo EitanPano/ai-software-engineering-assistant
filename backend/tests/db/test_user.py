@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 from psycopg import errors
+from pydantic import JsonValue
 
 from app.api.user import service as user_service
 from app.infra.pubsub import pubsub
@@ -134,6 +135,77 @@ class TestTheUserServiceOnPostgres:
         assert [user.id for user in first.items] == ["a", "b", "c"]
         assert [user.id for user in second.items] == ["d"]
         assert second.next_cursor is None
+
+    async def test_returns_timestamps_in_utc_with_their_precision(self) -> None:
+        created_at = datetime(2026, 1, 2, 3, 4, 5, 678000, tzinfo=UTC)
+        created = await user_service.insert_user(record("utc@example.com", created_at=created_at))
+
+        found = await user_service.find_user_by_id(created.id)
+
+        assert found == created
+        assert found is not None
+        assert found.created_at == created_at
+        assert found.created_at.utcoffset() == UTC.utcoffset(None)
+
+    async def test_lists_an_empty_table_as_an_empty_page_and_rejects_an_invalid_cursor(
+        self,
+    ) -> None:
+        page = await user_service.list_users(cursor=None, limit=5)
+
+        assert (page.items, page.next_cursor) == ([], None)
+        with pytest.raises(AppError) as raised:
+            await user_service.list_users(cursor="not-a-cursor", limit=5)
+        assert raised.value.code == "validation_failed"
+
+    async def test_sends_every_value_as_a_parameter_never_inside_the_statement(self) -> None:
+        hostile = 'x\'); drop table "user"; --@example.com'
+
+        created = await user_service.insert_user(record(hostile, user_id="quoted'id"))
+
+        assert await user_service.find_user_by_id("quoted'id") == created
+        assert await user_service.find_user_by_email(hostile) == created
+        assert await user_service.find_user_by_id("' or '1'='1") is None
+        assert await user_service.find_user_by_email("' or '1'='1") is None
+
+
+async def admin_headers() -> dict[str, str]:
+    boss = await user_service.insert_user(record("boss@example.com", role=UserRole.admin))
+    claims = AccessClaims(sub=boss.id, role=UserRole.admin, sid=str(uuid.uuid4()))
+    return bearer_of(sign_access(claims).token)
+
+
+def forged_cursor(payload: JsonValue) -> str:
+    raw = json.dumps(payload).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+class TestCursorIsStrict:
+    @pytest.mark.parametrize(
+        "created_at",
+        [0, 1767225600, True, "2026-01-01", "1767225600", "2026-01-01T00:00:00", None, 1.5],
+    )
+    async def test_rejects_a_created_at_that_is_not_an_iso_string_with_a_timezone(
+        self, client: httpx.AsyncClient, created_at: JsonValue
+    ) -> None:
+        """A Unix timestamp is not a cursor."""
+        cursor = forged_cursor({"created_at": created_at, "id": "a"})
+
+        res = await client.get(
+            "/api/user", params={"cursor": cursor}, headers=await admin_headers()
+        )
+
+        assert res.status_code == 400
+        assert res.json()["error"]["message"] == "invalid cursor"
+
+    async def test_still_accepts_the_cursor_the_list_wrote(self, client: httpx.AsyncClient) -> None:
+        headers = await admin_headers()
+        await user_service.insert_user(record("second@example.com"))
+        first = (await client.get("/api/user?limit=1", headers=headers)).json()
+
+        res = await client.get("/api/user", params={"cursor": first["nextCursor"]}, headers=headers)
+
+        assert res.status_code == 200
+        assert [user["email"] for user in res.json()["items"]] == ["second@example.com"]
 
 
 class TestGetUserOnPostgres:

@@ -34,6 +34,9 @@ function defineJourneys() {
       await page.reload()
       await expect(page.getByRole('log').locator('strong', { hasText: TEXT.strong })).toBeVisible()
       await expect(page.getByRole('log').getByText(TEXT.first)).toBeVisible()
+      // After a reload the form follows the latest run, and Send is enabled once that run is read
+      // as finished, which can come after first paint.
+      await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled()
       await expectNoSeriousViolations(page)
     })
 
@@ -44,6 +47,8 @@ function defineJourneys() {
       await expect(log.getByText(TEXT.toolName, { exact: true })).toBeVisible()
       await expect(log.getByText('Denied')).toBeVisible()
       await expect(log.getByText(TEXT.toolDone)).toBeVisible()
+      // The run has ended once Send is enabled again; its fade from disabled starts only then.
+      await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled()
       await expectNoSeriousViolations(page)
     })
 

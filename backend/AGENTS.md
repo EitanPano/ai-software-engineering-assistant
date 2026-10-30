@@ -78,9 +78,9 @@ src/app/
   config/             env.py · constants.py · cors.py · routes.py
   api/<name>/         routes · controller · schema; service only when the module has data
                       (model.py: reserved, for an engine that defines storage in code)
-                      (health, auth, user, module: the commented reference; conversation, run:
-                      the chat; agent: the loop, a controller only)
-  models/<name>/      interface · type · enums · constants (auth, session, user, module,
+                      (health, auth, user; conversation: the reference to copy; run: the
+                      agent's runs; agent: the loop, a controller only)
+  models/<name>/      interface · type · enums · constants (auth, session, user,
                       conversation, run)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
@@ -120,7 +120,7 @@ openapi.json          the committed contract, written by the `contract` command
   is a resource (`user`) or a capability (`auth`, `health`). A module has the files it needs:
   `service.py` only with data of its own (`health` and `auth` have none).
   - `schema.py`: pydantic request and response models and the path and query parameter types
-    (`ModuleId`, `PageQuery`). Each model derives from `RequestModel`, `QueryModel` or
+    (`ConversationId`, `PageQuery`). Each model derives from `RequestModel`, `QueryModel` or
     `ResponseModel` (`services/utils/api_model.py`). The leaf of the module.
   - `routes.py`: the module's `router: APIRouter`. The gates (a rate limiter, and with accounts
     the authentication and role gates) are built once as named constants above the table, then
@@ -129,11 +129,12 @@ openapi.json          the committed contract, written by the `contract` command
     gates as `dependencies=[Depends(...)]`. No inline handlers, no logic.
   - `controller.py`: the module's business logic and its only door. Two kinds of export:
     - Handlers: one `async` function per endpoint, named after its operation with no suffix
-      (`create_module`, `get_module`), holding that endpoint's logic. FastAPI validates its
+      (`create_conversation`, `get_conversation`), holding that endpoint's logic. FastAPI validates its
       parameters from the signature; it applies the rules (raising `AppError`), reads and writes
       through its own `service.py`, maps records to response models, publishes events, calls
       providers, owns transactions when the engine has them, and returns the response model (or a
-      bare `Response` for a 204). `api/module/` is the example.
+      bare `Response` for a 204). `api/conversation/` is the example, and `api/auth/` (logout)
+      shows the 204.
       Auth handlers also set or clear cookies: cookies are transport, so they belong to the
       handler, which declares a `response: Response` parameter.
     - Rules: logic another module's controller, a job, a subscriber or a script needs is
@@ -145,7 +146,8 @@ openapi.json          the committed contract, written by the `contract` command
       handler, `get_caller_user` the rule it shares with auth.
   - `service.py` (and `model.py`): every query for the module and nothing else, private to it:
     only its own controller imports it. The only module files that import `services/db.py` or
-    `services/cache.py`.
+    `services/cache.py`. `api/user/service.py` is the example of `_to_record` and of `(created_at,
+    id)` paging.
 - `models/<name>/`: an entity's types, shared by every layer, and importing nothing but other
   `models/`, not even pydantic. `interface.py` the stored record (a frozen dataclass), `type.py`
   the public shape, the create and update inputs and derived types, `enums.py` closed value sets
@@ -180,12 +182,12 @@ openapi.json          the committed contract, written by the `contract` command
 
 | You are adding... | It goes in | Shape |
 | --- | --- | --- |
-| A resource or capability with endpoints | `api/<name>/` | copy `api/module/`, rename `module`, `Module`, `MODULE`; one line in `config/routes.py` and the component names in `COMPONENTS` in `openapi.py` |
-| An entity's types | `models/<name>/` | copy `models/module/` |
+| A resource or capability with endpoints | `api/<name>/` | copy `api/conversation/` minus the message and run parts (see Adding a module), rename `conversation`, `Conversation`; one line in `config/routes.py` and the component names in `COMPONENTS` in `openapi.py` |
+| An entity's types | `models/<name>/` | copy `models/conversation/` (`interface.py`) and `models/user/` (`type.py`) |
 | A limit on an entity's field | `models/<name>/constants.py` | lengths, ranges, defaults of the data |
 | A policy constant | `config/constants.py` | durations, attempts, windows, cookie and header names |
 | A request or response shape | `api/<name>/schema.py` | a `RequestModel`, `QueryModel` or `ResponseModel`; a contract component only when named in `COMPONENTS` |
-| An endpoint | `api/<name>/routes.py` + `controller.py` | one `router.add_api_route(...)`; one handler named after the operation (`create_module`); its input types in `schema.py` |
+| An endpoint | `api/<name>/routes.py` + `controller.py` | one `router.add_api_route(...)`; one handler named after the operation (`create_conversation`); its input types in `schema.py` |
 | A business rule, an event to publish, a call to another service | `api/<name>/controller.py` | in the endpoint's handler; an exported rule once something outside the module needs it; raises `AppError` |
 | A rule composing other modules | `api/<name>/controller.py` | `api/auth/` is the example |
 | A query | `api/<name>/service.py` | SQL through `fetch_one`, `fetch_all` and `execute` from `services/db.py`; an optional last `db` keyword; private to the module |
@@ -322,8 +324,8 @@ changes only by plan.
   changes these together, then runs the `contract` command: the `UserRole` enum
   (`models/user/enums.py`), `UserRoleName` (`api/user/schema.py`), the wire mapping in
   `api/user/controller.py` and the `role` column or check in the migrations; the `require_role(...)`
-  and `_assert_role(...)` gates in `api/user/` and `api/module/`; the seed or first-staff path that
-  calls `set_user_role`; the summaries that say "admin" (`routes.py` of both modules, and so
+  and `_assert_role(...)` gates in `api/user/`; the seed or first-staff path that
+  calls `set_user_role`; the summaries that say "admin" (`api/user/routes.py`, and so
   `openapi.json`); the tests that use the role; this file. The frontend's role type guard and gates
   follow (its `AGENTS.md`).
 - Gates: `middleware/auth.py` (`authenticate` never rejects, `require_auth` answers 401,
@@ -393,8 +395,7 @@ with it the query runs on the connection given, in whatever transaction that con
 controller cannot import `services/db.py`, so a module that must write two things together exports
 `with_transaction(work)` from its `service.py`: the controller opens it and passes the connection
 it receives to each query as `db=`. A service function never opens a transaction, and a transaction
-never spans modules. The helper is the same in every module (`api/module/service.py` has it until
-that module is dropped):
+never spans modules. The helper is the same in every module (`api/conversation/service.py` has it):
 
 ```python
 async def with_transaction[T](work: Callable[[Executor], Awaitable[T]]) -> T:
@@ -407,7 +408,8 @@ async def with_transaction[T](work: Callable[[Executor], Awaitable[T]]) -> T:
 
 # In the controller: both writes commit together or not at all.
 async def place(order: Order) -> None:
-    async def work(db: Executor) -> None:
+    # `service.Tx` is the service's name for `Executor`: a controller may not import `services/db.py`.
+    async def work(db: service.Tx) -> None:
         await create_order(order, db=db)
         await reserve_stock(order.items, db=db)
 
@@ -434,11 +436,11 @@ Work in this order, test first.
    `enums`, `constants`). A record is a frozen dataclass; models import no pydantic.
 2. `schema.py`: pydantic models. A request body derives from `RequestModel`, a query from
    `QueryModel`, a response from `ResponseModel`. A list's page is a concrete subclass of
-   `Page[T]` (`class ModulePage(Page[Module])`) and its query is `PageQuery`.
+   `Page[T]` (`class ConversationPage(Page[Conversation])`) and its query is `PageQuery`.
 3. `tests/test_<name>.py` (see Tests), red.
 4. `service.py`, only when the module has data: SQL through the helpers of `services/db.py`, one
    row dataclass and one `_to_record` mapping per entity, an optional last `db` keyword on every
-   query (`find_module_by_id`, `list_modules`), and a cursor model for `decode_cursor` when the
+   query (`find_owned_conversation`, `list_conversations`), and a cursor model for `decode_cursor` when the
    list pages. The table and its indexes ship in a migration (see Adding the data layer).
 5. `controller.py`: one handler per endpoint (it maps the stored record to the wire and raises
    `AppError`), publishes the event after the write, then the exported rules other modules need.
@@ -452,13 +454,17 @@ Work in this order, test first.
 7. One line in `config/routes.py`, the component names in `COMPONENTS` in `openapi.py`, then the
    `contract` command (`uv run poe contract`), then `check`.
 
-Start by copying `api/module/` and `models/module/`, renaming in directories, files, identifiers,
-comments and constants: `module` to `<name>`, `Module` to `<Name>`, `MODULE` to `<NAME>`. The
-docstring of each file says what belongs there and what does not. Drop the reference module (both
-directories, its line in `config/routes.py`, its names in `COMPONENTS`, `MODULE_CREATED` and
-`ModuleCreated` in `services/event.py`, `RATE_LIMITS.create_post_per_ip` in `config/constants.py`,
-`tests/test_module.py`) once a real one exists (copy your first module for the next one), then regenerate `openapi.json` with the `contract`
-command.
+Start by copying `api/conversation/` and `models/conversation/`, renaming in directories, files,
+identifiers, comments and constants: `conversation` to `<name>`, `Conversation` to `<Name>`. The
+docstring of each file says what belongs there and what does not. `api/user/service.py` is the
+example of a `(created_at, id)` list and a `_to_record` mapping; `api/conversation/service.py`
+pages by `(updated_at, id)` and maps with `_to_conversation`. `models/user/type.py` is the
+example of a `type.py` with a public shape and inputs.
+
+What stays out of a copy of `api/conversation/`: the `message` entity (`Message`, `MESSAGE`,
+`_to_message`, `MessageCursor`, `HistoryTurn`, `NewTurn`, and `MESSAGE_LIMITS`, `MessageRole`,
+`HistoryTurn` and `NewTurn` in `models/conversation/`), `send_message` and `list_message`, and the
+`api/run` calls with `RUN_CREATED`.
 
 - One declaration, one validator: the handler's parameters are typed from `schema.py`, so FastAPI
   validates the request and the contract documents the same types.
@@ -472,7 +478,7 @@ command.
   with `decode_cursor`.
 - Another module is reached only through its exported controller rules, never its `service.py`.
 - A module with data ships its table in a migration (see Adding the data layer), and its
-  `service.py` is written like `api/module/service.py`: a row dataclass, one `_to_record` mapping,
+  `service.py` is written like `api/conversation/service.py`: a row dataclass, one row mapping,
   an optional last `db` keyword on every query.
 - The wire is camelCase and Python is snake_case; the alias generator says so once. A request
   accepts camelCase only, and a body is strict: `"5"` is not a number. A field that should convert
@@ -493,7 +499,7 @@ command.
   401 unauthenticated, 403 forbidden,
   404 missing, 409 conflict.
 
-`api/module/` is the worked example.
+`api/conversation/` is the worked example.
 
 ## Adding the data layer
 
@@ -505,11 +511,10 @@ The data layer is in place: this project was generated with `database/postgres`.
   task.
 - `services/db.py`: the seam (`get_db()`, `Executor`, `fetch_one`, `fetch_all`, `execute`; see The
   engine seam).
-- Every module's `service.py` in SQL. `api/module/service.py` is the reference until it is dropped,
-  then your first module is: a row dataclass,
-  one `_to_record` mapping from snake_case columns to the record, `with_transaction`, and cursor
-  pagination over `(created_at, id)`. `api/user/service.py` and `services/session.py` are in SQL
-  too. `model.py` stays unused.
+- Every module's `service.py` in SQL. `api/conversation/service.py` is the reference: a row
+  dataclass, `with_transaction`, and cursor pagination. `api/user/service.py` is the example of
+  one `_to_record` mapping from snake_case columns to the record and of pagination over
+  `(created_at, id)`. `services/session.py` is in SQL too. `model.py` stays unused.
 - `infra/migrations/` (shipped inside the `app` package), `infra/scripts/migrate.py` and the
   `migrate` task in `[tool.poe.tasks]`.
 - `services/utils/postgres_error.py`, applied by `middleware/error_handler.py` (see Errors).
@@ -535,9 +540,6 @@ Changing the data model, in this order:
 5. Update the module's `service.py`, its row dataclass and `_to_record`, and
    `models/<name>/interface.py`.
 6. `uv run poe migrate`, then `uv run poe test-db`, then `uv run poe check`.
-
-The `module` table in `0001-init.sql` belongs to the reference module. Drop it with a new migration
-once the module is removed, unless no database has applied `0001-init.sql` yet.
 
 Commands:
 

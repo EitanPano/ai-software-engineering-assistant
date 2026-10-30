@@ -4,6 +4,7 @@ from typing import Final
 
 import httpx
 import pytest
+from fastapi.routing import iter_route_contexts
 from pydantic import JsonValue
 
 from app.config.constants import PROJECT_NAME
@@ -123,49 +124,61 @@ class TestTheDocument:
         assert "503" in responses
         assert "Readiness" in as_object(as_object(doc["components"])["schemas"])
 
-    def test_documents_the_module_endpoints_at_their_singular_paths(self) -> None:
+    def test_documents_exactly_the_surviving_paths(self) -> None:
         doc = build_openapi_document(app)
 
-        paths = as_object(doc["paths"])
-        assert set(paths) >= {"/api/module", "/api/module/{id}"}
-        assert set(as_object(paths["/api/module"])) == {"get", "post"}
-        assert set(as_object(paths["/api/module/{id}"])) == {"get", "patch", "delete"}
+        paths = {path: set(as_object(item)) for path, item in as_object(doc["paths"]).items()}
+        assert paths == {
+            "/api/health": {"get"},
+            "/api/health/ready": {"get"},
+            "/api/auth/register": {"post"},
+            "/api/auth/login": {"post"},
+            "/api/auth/refresh": {"post"},
+            "/api/auth/logout": {"post"},
+            "/api/auth/otp": {"post"},
+            "/api/auth/otp/verification": {"post"},
+            "/api/user/me": {"get", "patch"},
+            "/api/user": {"get"},
+            "/api/user/{id}": {"get"},
+            "/api/conversation": {"get", "post"},
+            "/api/conversation/{id}": {"get"},
+            "/api/conversation/{id}/message": {"get", "post"},
+            "/api/run/{id}/event": {"get"},
+        }
 
-    def test_documents_the_module_list_query_and_its_page_component(self) -> None:
+    def test_documents_the_user_list_query_and_its_page_component(self) -> None:
         doc = build_openapi_document(app)
 
-        list_ = as_object(as_object(as_object(doc["paths"])["/api/module"])["get"])
+        list_ = as_object(as_object(as_object(doc["paths"])["/api/user"])["get"])
         assert isinstance(list_["parameters"], list)
         parameters = [as_object(p) for p in list_["parameters"]]
         assert {p["name"]: p["in"] for p in parameters} == {"cursor": "query", "limit": "query"}
         limit = as_object(next(p for p in parameters if p["name"] == "limit")["schema"])
         assert (limit["minimum"], limit["maximum"], limit["default"]) == (1, 100, 20)
-        page = as_object(as_object(as_object(doc["components"])["schemas"])["ModulePage"])
+        page = as_object(as_object(as_object(doc["components"])["schemas"])["UserPage"])
         assert names(page["required"]) == {"items", "nextCursor"}
         assert "Page" not in as_object(as_object(doc["components"])["schemas"])
 
-    def test_documents_the_module_status_as_an_inline_enum_and_timestamps_as_date_time(
+    def test_documents_the_user_status_as_an_inline_enum_and_timestamps_as_date_time(
         self,
     ) -> None:
         doc = build_openapi_document(app)
 
-        module = as_object(as_object(as_object(doc["components"])["schemas"])["Module"])
-        properties = as_object(module["properties"])
-        assert as_object(properties["status"])["enum"] == ["active", "archived"]
+        user = as_object(as_object(as_object(doc["components"])["schemas"])["PublicUser"])
+        properties = as_object(user["properties"])
+        assert as_object(properties["status"])["enum"] == ["active", "blocked"]
         assert as_object(properties["createdAt"])["format"] == "date-time"
         assert as_object(properties["updatedAt"])["format"] == "date-time"
-        assert names(module["required"]) == {"id", "name", "status", "createdAt", "updatedAt"}
+        assert names(user["required"]) >= {"id", "email", "status", "createdAt", "updatedAt"}
 
-    def test_documents_a_delete_with_no_body_and_a_create_without_a_rate_limit(self) -> None:
+    def test_documents_a_204_with_no_body_and_a_create_without_a_body_or_a_400(self) -> None:
         doc = build_openapi_document(app)
 
         paths = as_object(doc["paths"])
-        delete = as_object(as_object(paths["/api/module/{id}"])["delete"])
-        assert as_object(as_object(delete["responses"])["204"]) == {"description": "Deleted"}
-        create = as_object(as_object(paths["/api/module"])["post"])
-        expected = {"201", "400", "500"}
-        expected |= {"401"}
-        assert set(as_object(create["responses"])) == expected
+        logout = as_object(as_object(paths["/api/auth/logout"])["post"])
+        assert "content" not in as_object(as_object(logout["responses"])["204"])
+        create = as_object(as_object(paths["/api/conversation"])["post"])
+        assert set(as_object(create["responses"])) == {"201", "401", "500"}
 
     def test_sets_the_document_metadata(self) -> None:
         doc = build_openapi_document(app)
@@ -214,10 +227,6 @@ class TestTheShaping:
                 "HealthResponse",
                 "Readiness",
                 "ErrorBody",
-                "Module",
-                "ModulePage",
-                "CreateModuleBody",
-                "UpdateModuleBody",
                 "AuthSession",
                 "PublicUser",
                 "AuthTokens",
@@ -443,13 +452,13 @@ class TestTheAuthContract:
         assert paths["/api/user"] == {"get"}
         assert paths["/api/user/{id}"] == {"get"}
 
-    def test_documents_the_gated_module_endpoints_with_their_401_and_403(self) -> None:
+    def test_documents_the_gated_user_endpoint_with_its_401_and_403(self) -> None:
         doc = build_openapi_document(app)
 
-        module = as_object(as_object(doc["paths"])["/api/module/{id}"])
-        delete = as_object(as_object(module["delete"])["responses"])
-        assert {"401", "403"} <= set(delete)
-        assert as_object(module["delete"])["summary"] == "Delete a module (admin only)"
+        user = as_object(as_object(doc["paths"])["/api/user/{id}"])
+        get = as_object(as_object(user["get"])["responses"])
+        assert {"401", "403"} <= set(get)
+        assert as_object(user["get"])["summary"] == "Get a user by id (admin)"
 
     def test_documents_the_tri_state_phone_as_an_optional_nullable_string(self) -> None:
         doc = build_openapi_document(app)
@@ -497,6 +506,26 @@ class TestEveryDocumentedPathIsMounted:
                 res = await client.request(method.upper(), path)
 
                 assert "no route for" not in res.text, (method, path)
+
+    def test_documents_every_api_path_and_method_it_mounts(self) -> None:
+        doc = build_openapi_document(app)
+        documented = {
+            (path, method.upper())
+            for path, item in as_object(doc["paths"]).items()
+            for method in as_object(item)
+            if method in METHODS
+        }
+
+        # `iter_route_contexts` flattens the included routers into their full paths.
+        mounted = {
+            (route.path, method)
+            for route in iter_route_contexts(app.routes)
+            if route.path is not None and route.path.startswith("/api")
+            for method in route.methods or ()
+            if method != "HEAD"
+        }
+
+        assert mounted == documented
 
     async def test_still_answers_not_found_for_a_path_no_module_owns(
         self, client: httpx.AsyncClient

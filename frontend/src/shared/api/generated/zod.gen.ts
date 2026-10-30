@@ -36,13 +36,6 @@ export const zConversationPage = z.object({
 })
 
 /**
- * CreateModuleBody
- */
-export const zCreateModuleBody = z.object({
-  name: z.string().min(1).max(100),
-})
-
-/**
  * Credentials
  */
 export const zCredentials = z.object({
@@ -110,25 +103,6 @@ export const zMessage = z.object({
  */
 export const zMessagePage = z.object({
   items: z.array(zMessage),
-  nextCursor: z.string().nullable(),
-})
-
-/**
- * Module
- */
-export const zModule = z.object({
-  id: z.string(),
-  name: z.string(),
-  status: z.enum(['active', 'archived']),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-})
-
-/**
- * ModulePage
- */
-export const zModulePage = z.object({
-  items: z.array(zModule),
   nextCursor: z.string().nullable(),
 })
 
@@ -321,14 +295,6 @@ export const zUpdateMeBody = z.object({
 })
 
 /**
- * UpdateModuleBody
- */
-export const zUpdateModuleBody = z.object({
-  name: z.string().min(1).max(100).optional(),
-  status: z.enum(['active', 'archived']).optional(),
-})
-
-/**
  * UserPage
  */
 export const zUserPage = z.object({
@@ -418,52 +384,6 @@ export const zGetApiUserByIdPath = z.object({
  * The user
  */
 export const zGetApiUserByIdResponse = zPublicUser
-
-export const zGetApiModuleQuery = z.object({
-  cursor: z.string().optional(),
-  limit: z.int().gte(1).lte(100).optional().default(20),
-})
-
-/**
- * A page of modules
- */
-export const zGetApiModuleResponse = zModulePage
-
-export const zPostApiModuleBody = zCreateModuleBody
-
-/**
- * The created module
- */
-export const zPostApiModuleResponse = zModule
-
-export const zDeleteApiModuleByIdPath = z.object({
-  id: z.string().min(1),
-})
-
-/**
- * Deleted
- */
-export const zDeleteApiModuleByIdResponse = z.void()
-
-export const zGetApiModuleByIdPath = z.object({
-  id: z.string().min(1),
-})
-
-/**
- * The module
- */
-export const zGetApiModuleByIdResponse = zModule
-
-export const zPatchApiModuleByIdBody = zUpdateModuleBody
-
-export const zPatchApiModuleByIdPath = z.object({
-  id: z.string().min(1),
-})
-
-/**
- * The updated module
- */
-export const zPatchApiModuleByIdResponse = zModule
 
 export const zGetApiConversationQuery = z.object({
   cursor: z.string().optional(),

@@ -196,6 +196,10 @@ eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-30: the template's reference module leaves the product. Routes `GET` and
+  `POST /api/module`, `GET`, `PATCH` and `DELETE /api/module/{id}` and the table `module` are
+  removed (`0003-drop-module.sql`, forward-only); nothing called them. `api/conversation/` is now
+  the module to copy.
 - 2026-10-30: conversations and agent runs. Routes `POST` and `GET /api/conversation`,
   `GET /api/conversation/{id}`, `GET` and `POST /api/conversation/{id}/message` and the SSE stream
   `GET /api/run/{id}/event`; all owner only, another user's record is a 404. Tables `conversation`,
