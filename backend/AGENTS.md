@@ -94,7 +94,7 @@ src/app/
     jobs/             one file per background job: session_cleanup
     subscribers/      one file per event reaction: send_welcome, execute_run
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
-    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db); seed is reserved
+    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin); seed is reserved
 tests/                mirrors src/app/ (a package throughout, so two test_x.py cannot clash)
 openapi.json          the committed contract, written by the `contract` command
 ```
@@ -198,7 +198,7 @@ openapi.json          the committed contract, written by the `contract` command
 | A pure helper | `services/utils/<name>.py` | no I/O, no state |
 | A security primitive | `services/security/<name>.py` | hashing, tokens, cookies, OTP |
 | A way to reach a person | `services/communicate/<channel>.py` | `Provider` protocol, console provider, env selection |
-| A real provider for a channel | `services/<vendor>.py` + a `case` in the channel file | `MAIL_PROVIDER=<vendor>` selects it |
+| A real provider for a channel | `services/<vendor>.py` + a `case` in the channel file | `MAIL_PROVIDER=<vendor>` selects it; the task that adds a mail provider (the console one delivers nothing in production) lists the existing admins and re-checks that each address is one only its owner controls, because a login code then reaches the mailbox |
 | A message's wording | `services/communicate/templates/<name>.py` | pure function returning a `Rendered` |
 | A gate an endpoint needs | `middleware/<name>.py` | a dependency in the route's `dependencies=[Depends(...)]` |
 | Handling every request needs | `middleware/<name>.py` | pure ASGI middleware, added in `server.py`; never `BaseHTTPMiddleware` |
@@ -206,7 +206,7 @@ openapi.json          the committed contract, written by the `contract` command
 | A background job | `infra/jobs/<name>.py` | `Job(name, schedule, run)`; listed in `_jobs()` in `infra/scheduler.py` |
 | An event | `services/event.py` | a `Topic` constant with its payload type; `publish` from a controller; handlers run detached, tests await `drain()` |
 | A reaction to an event | `infra/subscribers/<name>.py` | `subscriber(TOPIC, handle)`; listed in `_subscribers()` in `infra/pubsub.py` |
-| A one-off command (seed) | `infra/scripts/<name>.py` | `uv run python -m app.infra.scripts.<name>`; may call controllers' rules; `migrate.py` is the shipped one |
+| A one-off command (seed) | `infra/scripts/<name>.py` | `uv run python -m app.infra.scripts.<name>`; may call controllers' rules; `migrate.py` is the shipped one, `grant_admin.py` the one that makes an admin |
 | An environment variable | `config/env.py` + `.env.example` | required in production, defaulted elsewhere |
 | An allowed browser origin | `config/cors.py` | set `CORS_ORIGINS`, only when a browser calls the API directly |
 
@@ -319,13 +319,35 @@ changes only by plan.
   call cannot reach further than the route would. Operations only other modules, jobs or scripts
   call take no caller and are named system operations: `create_user`, `find_user_by_email`,
   `find_user_by_target`, `get_active_user`, `mark_verified`, `set_user_role`. There is no admin
-  bootstrap: a seed script calls `set_user_role`.
+  bootstrap but `infra/scripts/grant_admin.py`. Register the account yourself first (the sign-up
+  page, or `POST /api/auth/register`; a 409 means the address is taken, so stop), then run it:
+  locally `uv run python -m app.infra.scripts.grant_admin <email>`; in the Compose stack
+  `docker compose --profile app run --rm backend-migrate python -m
+  app.infra.scripts.grant_admin <email>` (same image and environment as the server, so the
+  production secrets and `DATABASE_URL` are exported). It takes exactly one argument, the email,
+  and asks for the account's password on a hidden prompt, or reads one line of stdin when there is
+  no terminal: `printf '%s\n' "$PASSWORD" | docker compose --profile app run --rm -T backend-migrate
+  python -m app.infra.scripts.grant_admin <email>`. A password is never an argument. Set
+  `PASSWORD` without history or a command line: `read -rs PASSWORD` (bash) types it unechoed, and
+  `printf` is a shell builtin, so the pipe keeps it out of the process list; `unset PASSWORD`
+  afterwards. Caution, not reproduced here: under Git Bash's default mintty, stdin may not be a
+  terminal, so the prompt may not hide what you type; run it from PowerShell or prefix `winpty`.
+  The email must be an address only you control: a login code needs just the mailbox and mints a
+  token with the account's current role, so an admin's mailbox is a second credential for the
+  admin account. `register`
+  takes any address and a verified email proves the mailbox, not the password, so the script
+  checks the password through auth's exported `verify_credentials` (one failure message for an
+  unknown email and a wrong password; a blocked account is refused) and exits 1 writing nothing
+  otherwise. An account that is already an admin is left alone. Otherwise it revokes the account's
+  sessions (`revoke_all_sessions`, since a refresh re-reads the role) and calls `set_user_role`;
+  the account signs in again, because the role is a claim in the access token. It logs the user
+  id only.
 - **Renaming the roles.** The template's roles are `user` and `admin`. A product that renames them
   changes these together, then runs the `contract` command: the `UserRole` enum
   (`models/user/enums.py`), `UserRoleName` (`api/user/schema.py`), the wire mapping in
   `api/user/controller.py` and the `role` column or check in the migrations; the `require_role(...)`
   and `_assert_role(...)` gates in `api/user/`; the seed or first-staff path that
-  calls `set_user_role`; the summaries that say "admin" (`api/user/routes.py`, and so
+  calls `set_user_role` (`grant_admin`); the summaries that say "admin" (`api/user/routes.py`, and so
   `openapi.json`); the tests that use the role; this file. The frontend's role type guard and gates
   follow (its `AGENTS.md`).
 - Gates: `middleware/auth.py` (`authenticate` never rejects, `require_auth` answers 401,
@@ -550,9 +572,12 @@ Commands:
   selector_loop_factory)`).
 - `uv run poe test-db` runs the whole suite against `app_test`.
 
-Local service: `docker compose up -d --wait database` at the project root starts Postgres 17 on
-`127.0.0.1:5432` and returns when it is healthy (`migrate` has no connect retry, and on a fresh
-volume the image is not ready right away). `DATABASE_URL` is a secret, since it carries the
+Local service: `docker compose up -d --wait database` at the project root starts Postgres 18 with
+`pgvector` (`pgvector/pgvector:0.8.7-pg18`, pinned by digest; migration `0004-vector-extension.sql`
+enables `vector`) on `127.0.0.1:5432` and returns when it is healthy (`migrate` has no connect
+retry, and on a fresh volume the image is not ready right away). The data lives in the named volume
+`database-pg18`, mounted at `/var/lib/postgresql`; the older volume `database-data` (the previous
+major version) is left untouched and removing it is a human's job, so local data from before the move stays behind. `DATABASE_URL` is a secret, since it carries the
 password: required in production, defaulted outside it to `postgres://app:app@127.0.0.1:5432/app`
 (the entry warns once, like any defaulted secret), and it must be a `postgres://` or
 `postgresql://` URL. The default host is `127.0.0.1`, not `localhost`: the service publishes on

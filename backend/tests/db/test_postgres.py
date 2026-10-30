@@ -267,6 +267,56 @@ class TestMigrate:
         assert row == (0,)
 
 
+@dataclass(frozen=True)
+class Version:
+    version: int
+
+
+class TestTheEngine:
+    """The `database` service is Postgres 18 with pgvector: the retrieval tasks build on both."""
+
+    async def test_is_postgres_18_or_later(self) -> None:
+        row = await fetch_one(
+            Version, "select current_setting('server_version_num')::int as version"
+        )
+
+        assert row is not None
+        assert row.version >= 180000
+
+    async def test_has_the_vector_extension_enabled_by_a_shipped_migration(self) -> None:
+        row = await fetch_one(
+            Name, "select extname as name from pg_extension where extname = 'vector'"
+        )
+
+        assert row is not None
+        assert row.name == "vector"
+        assert await recorded_migrations(["0004-vector-extension.sql"]) == [
+            "0004-vector-extension.sql"
+        ]
+
+    async def test_round_trips_a_halfvec_and_takes_an_hnsw_index(self) -> None:
+        literal = "[" + ",".join("0.5" if i == 0 else "0" for i in range(1024)) + "]"
+        async with get_db() as connection, connection.transaction():
+            await connection.execute(
+                "create temporary table probe_vector (id int primary key, embedding halfvec(1024)) "
+                "on commit drop"
+            )
+            await connection.execute(
+                "create index on probe_vector using hnsw (embedding halfvec_cosine_ops)"
+            )
+            await connection.execute(
+                "insert into probe_vector values (1, %s::halfvec(1024))", (literal,)
+            )
+            cursor = await connection.execute(
+                "select embedding::text as text from probe_vector where id = 1"
+            )
+            row = await cursor.fetchone()
+
+        assert row is not None
+        assert row[0].startswith("[0.5,0,")
+        assert row[0].count(",") == 1023
+
+
 class TestTheMigrateCommand:
     async def test_exits_zero_when_the_migrations_apply(self) -> None:
         assert await migrate_script.main() == 0

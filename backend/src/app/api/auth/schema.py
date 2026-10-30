@@ -39,7 +39,8 @@ type OtpCode = Annotated[str, StringConstraints(pattern=r"^[0-9]{6}$")]
 
 
 class Credentials(RequestModel):
-    """HTTP-only: the input of register and login."""
+    """The input of register and login, and of the `grant_admin` script, which builds one to reach
+    `verify_credentials`."""
 
     email: Email
     password: Password

@@ -65,11 +65,11 @@ never widen permissions and approval is the control on every write. No tool exec
 The harness ships no database. A provider chosen at the bootstrap wires one; otherwise the
 `database` skill lists the options and what the data-layer task delivers. No task may store data while a marker remains here.
 
-- Engine: Postgres 17 (`postgres:17-alpine`) as generated. The task that connects the first
-  source moves the service to Postgres 18 with `pgvector` (`pgvector/pgvector:pg18`), so one store
-  holds relational rows, JSONB, full-text indexes and vectors. Postgres 18's image changed its
-  data directory: that task confirms the path and mounts a new volume, because a 17 volume cannot
-  be reused and removing the old one is a human's job.
+- Engine: Postgres 18 with `pgvector` (`pgvector/pgvector:0.8.7-pg18`, pinned by digest in
+  `docker-compose.yml`), so one store holds relational rows, JSONB, full-text indexes and vectors.
+  Postgres 18's image keeps its data in `/var/lib/postgresql/18/docker` and declares the volume
+  one level up, so the named volume `database-pg18` mounts at `/var/lib/postgresql`. A 17 volume
+  cannot be reused: `database-data` is left as it was, and removing it is a human's job.
 - Keyword search: built-in full-text search and `pg_trgm`, fused with vector results by RRF.
   `ts_rank` has no IDF, so the retrieval evals decide whether a BM25 extension is worth its custom
   image.
@@ -196,6 +196,10 @@ eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-30: the `database` service moves to Postgres 18 with `pgvector` on a new volume, and
+  `0004-vector-extension.sql` enables `vector`. `grant_admin`, a shell command, makes the first
+  admin: it takes the account's password and ends its sessions, because `register` takes any
+  address and a verified email proves the mailbox, not the password.
 - 2026-10-30: the template's reference module leaves the product. Routes `GET` and
   `POST /api/module`, `GET`, `PATCH` and `DELETE /api/module/{id}` and the table `module` are
   removed (`0003-drop-module.sql`, forward-only); nothing called them. `api/conversation/` is now

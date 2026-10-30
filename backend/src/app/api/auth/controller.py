@@ -99,11 +99,12 @@ async def _active_user_or_unauthenticated(user_id: str) -> PublicUser:
         raise
 
 
-async def _verify_credentials(credentials: Credentials) -> PublicUser:
+async def verify_credentials(credentials: Credentials) -> PublicUser:
     """Every credential failure costs one password verification and gives one message, so neither
     timing nor text tells a caller whether the email exists. The blocked check comes after the
     password so a wrong password never learns that the account is blocked. The hash is read here
-    and nowhere else in auth, and never returned."""
+    and nowhere else in auth, and never returned. The login rate limiters live on the route, not
+    here: a new caller gets none of them and must bound its own attempts."""
     found = await user.find_user_by_email(credentials.email)
     stored = None if found is None else found.password_hash
     if found is None or stored is None:
@@ -170,7 +171,7 @@ async def register(body: Credentials, response: Response) -> AuthSession:
 
 
 async def login(body: Credentials, response: Response) -> AuthSession:
-    account = await _verify_credentials(body)
+    account = await verify_credentials(body)
     return _start_session(response, account, await _issue_tokens(account))
 
 

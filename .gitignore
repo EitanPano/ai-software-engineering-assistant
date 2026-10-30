@@ -18,6 +18,7 @@
 # OS / editor
 .DS_Store
 Thumbs.db
+*.stackdump
 *.log
 
 # --- fullstack-templates: python ---
