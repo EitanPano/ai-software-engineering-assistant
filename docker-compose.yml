@@ -1,0 +1,106 @@
+name: ai-software-engineering-assistant
+
+# Application services sit under the `app` profile, so `docker compose --profile app up --build`
+# runs the stack from the package Dockerfiles. Infrastructure services (a database, a queue)
+# have no profile, so `docker compose up -d <service>` starts one alone for local development.
+services:
+  backend:
+    # Single: the image also holds the SPA, copied from the frontend's build-only service (the
+    # Dockerfile's `spa` context; Compose 2.35.0 or later).
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    environment:
+      APP_ENV: production
+      PORT: "8000"
+      # Required in production; the backend fails fast at boot when one is missing. ${VAR-} (not
+      # ${VAR:?}, not a bare ${VAR}) so `docker compose up -d <service>` for local infrastructure needs
+      # no secrets in the shell and prints no "variable is not set" warning.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET-}
+      OTP_SECRET: ${OTP_SECRET-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY-}
+      # Single: the server is the edge, so no proxy hop is trusted; IP-keyed rate limits use the socket
+      # address. Behind a production edge set the hop count (a PaaS edge is usually 1).
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      # Comma-separated browser origins allowed by CORS. Empty keeps it off, which is right while no
+      # browser calls the API from another origin.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Scheduled jobs run on exactly one replica. The template itself runs as one instance
+      # until the cache task (the cache, rate limits and the bus live in one process).
+      JOBS_ENABLED: ${JOBS_ENABLED:-true}
+      DATABASE_URL: ${DATABASE_URL-}
+    # Single: the server is the public edge, so it publishes on every interface. With TRUST_PROXY
+    # false no caller can choose its own client IP through X-Forwarded-For.
+    ports: [ "8000:8000" ]
+    profiles: [ "app" ]
+    depends_on:
+      database:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+  backend-migrate:
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    environment:
+      APP_ENV: production
+      PORT: "8000"
+      # Required in production; the backend fails fast at boot when one is missing. ${VAR-} (not
+      # ${VAR:?}, not a bare ${VAR}) so `docker compose up -d <service>` for local infrastructure needs
+      # no secrets in the shell and prints no "variable is not set" warning.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET-}
+      OTP_SECRET: ${OTP_SECRET-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY-}
+      # Single: the server is the edge, so no proxy hop is trusted; IP-keyed rate limits use the socket
+      # address. Behind a production edge set the hop count (a PaaS edge is usually 1).
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      # Comma-separated browser origins allowed by CORS. Empty keeps it off, which is right while no
+      # browser calls the API from another origin.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Scheduled jobs run on exactly one replica. The template itself runs as one instance
+      # until the cache task (the cache, rate limits and the bus live in one process).
+      JOBS_ENABLED: ${JOBS_ENABLED:-true}
+      DATABASE_URL: ${DATABASE_URL-}
+    command: python -m app.infra.scripts.migrate
+    restart: "no"
+    profiles:
+      - app
+    depends_on:
+      database:
+        condition: service_healthy
+  frontend:
+    # A build-only service that the server's build reads as its spa context (Compose 2.35.0 or
+    # newer). No depends_on (the server's build waits for this one), no environment, no container.
+    build:
+      context: ./frontend
+      target: dist
+    scale: 0
+  database:
+    # The credentials are for local development only; production supplies its own DATABASE_URL.
+    # The backend gets DATABASE_URL with no default, so the bundled credentials reach it only
+    # when a developer exports a URL that points at this service. Production does not refuse
+    # that choice. This service and the backend's depends_on on it stay: the compose file is
+    # the local stack.
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    # Loopback only: the database is for local work, never reachable from the network.
+    ports: [ "127.0.0.1:5432:5432" ]
+    volumes:
+      - database-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # Over TCP: the image's init phase listens on the socket only, so a socket check would
+    # report healthy before init.sql ran.
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U app -d app" ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  database-data: {}

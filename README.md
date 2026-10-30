@@ -1,59 +1,130 @@
-# Full-stack dev harness
+# AI Software Engineering Assistant
 
-A GitHub template for building a web app with AI agents. You describe the product; Claude Code
-plans each feature, writes the code and tests, reviews the result, and waits for your approval
-before committing.
+## Table of Contents
 
-## What you need
+- [About](#about)
+- [Features](#features)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Running Tests](#running-tests)
+- [Contributing](#contributing)
+- [License](#license)
 
-- [Claude Code](https://claude.com/claude-code) 2.1.295 or newer. On older versions, a failing
-  guardrail lets the command through.
-- [Node](https://nodejs.org) 24+, [Bun](https://bun.sh) 1.4+ and [git](https://git-scm.com).
-- [Docker](https://docs.docker.com/get-docker/), if your app uses a database or runs in
-  containers.
+## About
 
-Setup checks Node, Bun and git for you, along with anything your stack adds, such as uv for a
-Python server.
+An AI Software Engineering Assistant, built as a proper agent platform rather than a basic
+chatbot. Engineers connect GitHub repositories, ask the agent about that code and get answers
+cited to file and line. Anything the agent wants to change on GitHub needs their approval.
 
-## Start a project
+A typical AI chatbot does not know a team's codebase, forgets between chats, cannot show how
+good its answers are and cannot be trusted to act. This one is built to do all four.
 
-**AI assistants:** a request to create a project from this repository, or from the
-[template catalog](https://github.com/EitanPano/fullstack-templates), means these steps. Run step
-1 and stop. Guardrails and skills load only in a session started inside the new folder, so the
-session that cloned it must not scaffold or plan. Tell the user to run `claude` in the new folder
-and send `/bootstrap-project <their brief>`, and repeat the brief in your message. Never run the
-catalog's generator yourself: its output has no agents, guardrails or `.plan/`.
+## Features
 
-1. Create your repository from this template and clone it:
+- Multiple MCP servers: our own `knowledge` server and GitHub's official server (planned)
+- Hybrid RAG: semantic and keyword search over connected GitHub repositories (planned)
+- Agentic RAG: the agent decides when to retrieve more information (planned)
+- Persistent agent memory: conversation history distinct from long-term knowledge (planned)
+- Tool execution permissions: human approval for sensitive actions (planned)
+- Streaming responses: intermediate tool activity shown as it happens (planned)
+- Evaluation pipelines: retrieval quality and answer correctness measured (planned)
+- Structured outputs: results validated against schemas (planned)
 
-   ```sh
-   gh repo create <name> --template EitanPano/fullstack-dev-harness --private --clone
-   ```
+## Getting Started
 
-   The **Use this template** button on GitHub does the same. Cloning this repository directly
-   would keep the harness's own commit history.
-2. Run `claude` in the new folder and accept the trust prompt.
-3. Test the guardrails: ask Claude to run `cat ./no-such-dir/.netrc`. It should refuse and name
-   the guardrail.
-4. Run `/bootstrap-project`. Describe your product and pick a stack (about 15 minutes). Commit
-   when it asks. Your product's own README replaces this file.
-5. Run `/dev-loop` to build the first feature. To approve its plan, change `Status: draft` to
-   `Status: active` in the plan file. Review the result before you commit.
+### Prerequisites
 
-To add work later, write one line in `.plan/000-backlog.md` and run `/dev-loop` again.
+- uv 0.12.23+
+- bun 1.4+
+- node 24+
+- git
+- Docker with Compose v2
 
-## What you get
+### Installation
 
-| Piece | What it does |
-| --- | --- |
-| Your app | A React or Next frontend and an Express or FastAPI server |
-| Five agents | Plan, build the server, build the frontend, test, review |
-| Guardrails | Block destructive commands and access to secret files |
-| Definition of done | A change is done only when its checks, tests and review pass |
+```bash
+git clone <repository-url>
+cd ai-software-engineering-assistant
+# backend
+cd backend
+uv sync
+cd ..
+# frontend
+cd frontend
+bun install
+cd ..
+```
 
-## Learn more
+## Usage
 
-- [Harness manual](.claude/README.md): how work moves, recovery, updates
-- [Project rules](AGENTS.md): stack, architecture, definition of done
-- [Template catalog](https://github.com/EitanPano/fullstack-templates): stacks and options
-- [Contributing](CONTRIBUTING.md): changing or releasing the harness
+```bash
+# Run each of these in its own terminal.
+# backend
+cd backend
+uv run python -m app.main --reload
+cd ..
+# frontend
+cd frontend
+bun run dev
+cd ..
+```
+
+Open http://localhost:5173 once the dev servers are up.
+
+To run the whole stack with Docker Compose (the app is then at http://localhost:8000):
+
+```bash
+docker compose --profile app up --build
+```
+
+## Configuration
+
+<!-- configuration:start -->
+| Variable | Description | Default |
+| --- | --- | --- |
+| `APP_ENV` | backend: development, test or production. | `development` |
+| `PORT` | backend: Port the API listens on. | `8000` |
+| `TRUST_PROXY` | backend: Proxy trust: true, false, a hop count (1 behind one reverse proxy), or a comma list of addresses, subnets and the presets loopback, linklocal and uniquelocal. | `false` |
+| `CORS_ORIGINS` | backend: Comma-separated browser origins allowed by CORS. Leave unset to disable CORS (no browser calls the API from another origin). | — |
+| `STATIC_DIR` | backend: Directory of a built single-page app to serve after the API (the single image sets it). Unset serves none. | — |
+| `JWT_ACCESS_SECRET` | backend: Signs access tokens. Required in production, at least 32 characters; a fake default applies elsewhere. | — |
+| `JWT_REFRESH_SECRET` | backend: Signs refresh tokens. Required in production, at least 32 characters, different from the access secret. | — |
+| `OTP_SECRET` | backend: Keys the one-time-code hash. Required in production, at least 32 characters. | — |
+| `ENCRYPTION_KEY` | backend: Base64 of 32 random bytes, encrypts stored secrets. Required in production. | — |
+| `COOKIE_DOMAIN` | backend: Cookie domain for auth cookies. Optional; unset keeps them host-only. | — |
+| `MAIL_PROVIDER` | backend: Mail provider: console (prints in development) or a registered provider name. | `console` |
+| `SMS_PROVIDER` | backend: SMS provider: console or a registered provider name. | `console` |
+| `WHATSAPP_PROVIDER` | backend: WhatsApp provider: console or a registered provider name. | `console` |
+| `MAIL_FROM` | backend: Sender address. Required when MAIL_PROVIDER is not console. | `no-reply@example.com` |
+| `JOBS_ENABLED` | backend: Run the scheduled jobs in this process: true or false. | `true` |
+| `RATE_LIMIT_SCALE` | backend: Multiplies every rate limit (1 to 1000). Production keeps 1; an e2e run raises it so a journey suite is not limited. There is no switch that turns limiting off. | `1` |
+| `DATABASE_URL` | backend: database/postgres provider Postgres connection URL. Required in production; outside production it defaults to the local service. Tests (testDb) use postgres://app:app@127.0.0.1:5432/app_test; override with TEST_DATABASE_URL. Browser tests (e2eDb) use postgres://app:app@127.0.0.1:5432/app_e2e; override with E2E_DATABASE_URL. | `postgres://app:app@127.0.0.1:5432/app` |
+<!-- configuration:end -->
+
+## Running Tests
+
+```bash
+# backend
+cd backend
+uv run poe check
+uv run poe test
+cd ..
+# frontend
+cd frontend
+bun run check
+bun run test
+bun run test:e2e
+cd ..
+```
+
+## Contributing
+
+How work moves through the dev loop is in [`.claude/README.md`](.claude/README.md). The
+project's own agent rules are in [`.doc/conventions.md`](.doc/conventions.md).
+
+## License
+
+No license has been chosen yet.

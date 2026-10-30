@@ -6,7 +6,8 @@
 !.orchestrate/README.md
 # <<< harness
 
-# >>> harness-dev: removed at setup
+
+# --- fullstack-templates: base ---
 # secrets
 .env
 .env.*
@@ -14,17 +15,29 @@
 *.pem
 *.key
 
-# dependencies and build output
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+
+# --- fullstack-templates: python ---
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# --- fullstack-templates: node ---
 node_modules/
-.next/
 dist/
 coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
-
-# OS / editor
-.DS_Store
-Thumbs.db
-*.log
-# <<< harness-dev

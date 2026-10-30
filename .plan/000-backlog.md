@@ -18,7 +18,16 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-<!-- empty: the bootstrap-project skill adds the first task here -->
+- [ ] user can chat with the agent and watch the response stream
+- [ ] user can connect a GitHub repository to the knowledge base
+- [ ] user can search the knowledge base with hybrid search
+- [ ] admin can measure retrieval quality with an eval run
+- [ ] agent searches the knowledge base through our MCP server
+- [ ] user approves sensitive tool calls
+- [ ] agent acts on GitHub through the GitHub MCP server
+- [ ] agent remembers long-term knowledge across conversations
+- [ ] agent returns schema-validated structured results
+- [ ] admin can measure answer correctness with an eval run
 
 ## DONE
 
