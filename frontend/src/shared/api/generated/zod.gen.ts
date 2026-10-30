@@ -18,6 +18,24 @@ export const zAuthTokens = z.object({
 })
 
 /**
+ * Conversation
+ */
+export const zConversation = z.object({
+  id: z.string(),
+  title: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+})
+
+/**
+ * ConversationPage
+ */
+export const zConversationPage = z.object({
+  items: z.array(zConversation),
+  nextCursor: z.string().nullable(),
+})
+
+/**
  * CreateModuleBody
  */
 export const zCreateModuleBody = z.object({
@@ -74,6 +92,25 @@ export const zHealthResponse = z.object({
  */
 export const zLogoutBody = z.object({
   all: z.boolean().optional().default(false),
+})
+
+/**
+ * Message
+ */
+export const zMessage = z.object({
+  id: z.string(),
+  role: z.enum(['user', 'assistant']),
+  text: z.string(),
+  runId: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+})
+
+/**
+ * MessagePage
+ */
+export const zMessagePage = z.object({
+  items: z.array(zMessage),
+  nextCursor: z.string().nullable(),
 })
 
 /**
@@ -184,6 +221,93 @@ export const zReadiness = z.object({
  */
 export const zRefreshBody = z.object({
   refreshToken: z.string().optional(),
+})
+
+/**
+ * Run
+ */
+export const zRun = z.object({
+  id: z.string(),
+  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  errorCode: z
+    .enum(['refused', 'truncated', 'turn_limit', 'upstream_unavailable', 'interrupted', 'internal'])
+    .nullable(),
+  createdAt: z.iso.datetime(),
+})
+
+/**
+ * ConversationDetail
+ */
+export const zConversationDetail = z.object({
+  id: z.string(),
+  title: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  latestRun: zRun.nullable(),
+})
+
+/**
+ * RunEvent
+ */
+export const zRunEvent = z.union([
+  z.object({
+    type: z.literal('run_started').optional().default('run_started'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+  }),
+  z.object({
+    type: z.literal('text_delta').optional().default('text_delta'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal('tool_call_started').optional().default('tool_call_started'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+    toolUseId: z.string(),
+    name: z.string(),
+    input: z.record(z.string(), z.unknown()),
+  }),
+  z.object({
+    type: z.literal('tool_call_finished').optional().default('tool_call_finished'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+    toolUseId: z.string(),
+    status: z.enum(['succeeded', 'failed', 'denied']),
+    output: z.string(),
+  }),
+  z.object({
+    type: z.literal('run_finished').optional().default('run_finished'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+    status: z.enum(['completed', 'failed']),
+    errorCode: z
+      .enum([
+        'refused',
+        'truncated',
+        'turn_limit',
+        'upstream_unavailable',
+        'interrupted',
+        'internal',
+      ])
+      .nullable(),
+  }),
+])
+
+/**
+ * SendMessageBody
+ */
+export const zSendMessageBody = z.object({
+  content: z.string().min(1).max(32000),
+})
+
+/**
+ * SentMessage
+ */
+export const zSentMessage = z.object({
+  message: zMessage,
+  run: zRun,
 })
 
 /**
@@ -340,3 +464,65 @@ export const zPatchApiModuleByIdPath = z.object({
  * The updated module
  */
 export const zPatchApiModuleByIdResponse = zModule
+
+export const zGetApiConversationQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.int().gte(1).lte(100).optional().default(20),
+})
+
+/**
+ * A page of the caller's conversations, latest activity first
+ */
+export const zGetApiConversationResponse = zConversationPage
+
+/**
+ * The created conversation
+ */
+export const zPostApiConversationResponse = zConversation
+
+export const zGetApiConversationByIdPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The conversation and its latest run
+ */
+export const zGetApiConversationByIdResponse = zConversationDetail
+
+export const zGetApiConversationByIdMessagePath = z.object({
+  id: z.string().min(1),
+})
+
+export const zGetApiConversationByIdMessageQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.int().gte(1).lte(100).optional().default(20),
+})
+
+/**
+ * A page of messages, newest first
+ */
+export const zGetApiConversationByIdMessageResponse = zMessagePage
+
+export const zPostApiConversationByIdMessageBody = zSendMessageBody
+
+export const zPostApiConversationByIdMessagePath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The stored message and the run that answers it
+ */
+export const zPostApiConversationByIdMessageResponse = zSentMessage
+
+export const zGetApiRunByIdEventHeaders = z.object({
+  'Last-Event-ID': z.int().gte(0).nullish(),
+})
+
+export const zGetApiRunByIdEventPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The run's events as server-sent events; each `id` is the sequence
+ */
+export const zGetApiRunByIdEventResponse = zRunEvent

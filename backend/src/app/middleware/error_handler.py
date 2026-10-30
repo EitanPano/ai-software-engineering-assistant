@@ -33,10 +33,9 @@ from app.services.logger import log
 from app.services.utils.error import STATUS_BY_CODE, AppError, ErrorCode
 from app.services.utils.postgres_error import classify_postgres_error
 
-# FastAPI's own part names, in the order the first failing one is reported. A route declares no
-# Header or Cookie parameter (tokens are read through services/security/cookies.py), so these are
-# the parts a request can fail in.
-_PARTS: Final = ("body", "query", "path")
+# FastAPI's own part names, in the order the first failing one is reported. Tokens are read through
+# services/security/cookies.py, so the only header a route declares is the stream's `Last-Event-ID`.
+_PARTS: Final = ("body", "query", "path", "header")
 _CODE_BY_STATUS: Final[Mapping[int, ErrorCode]] = {
     status: code for code, status in STATUS_BY_CODE.items()
 }

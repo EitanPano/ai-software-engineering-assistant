@@ -5,6 +5,9 @@ import { queryOptions, type UseMutationOptions } from '@tanstack/react-query'
 import { client } from '../client.gen'
 import {
   deleteApiModuleById,
+  getApiConversation,
+  getApiConversationById,
+  getApiConversationByIdMessage,
   getApiHealth,
   getApiHealthReady,
   getApiModule,
@@ -21,12 +24,23 @@ import {
   postApiAuthOtpVerification,
   postApiAuthRefresh,
   postApiAuthRegister,
+  postApiConversation,
+  postApiConversationByIdMessage,
   postApiModule,
 } from '../sdk.gen'
 import type {
   DeleteApiModuleByIdData,
   DeleteApiModuleByIdError,
   DeleteApiModuleByIdResponse,
+  GetApiConversationByIdData,
+  GetApiConversationByIdError,
+  GetApiConversationByIdMessageData,
+  GetApiConversationByIdMessageError,
+  GetApiConversationByIdMessageResponse,
+  GetApiConversationByIdResponse,
+  GetApiConversationData,
+  GetApiConversationError,
+  GetApiConversationResponse,
   GetApiHealthData,
   GetApiHealthError,
   GetApiHealthReadyData,
@@ -72,6 +86,12 @@ import type {
   PostApiAuthRegisterData,
   PostApiAuthRegisterError,
   PostApiAuthRegisterResponse,
+  PostApiConversationByIdMessageData,
+  PostApiConversationByIdMessageError,
+  PostApiConversationByIdMessageResponse,
+  PostApiConversationData,
+  PostApiConversationError,
+  PostApiConversationResponse,
   PostApiModuleData,
   PostApiModuleError,
   PostApiModuleResponse,
@@ -539,6 +559,138 @@ export const patchApiModuleByIdMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await patchApiModuleById({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getApiConversationQueryKey = (options?: Options<GetApiConversationData>) =>
+  createQueryKey('getApiConversation', options)
+
+/**
+ * List the caller's conversations
+ */
+export const getApiConversationOptions = (options?: Options<GetApiConversationData>) =>
+  queryOptions<
+    GetApiConversationResponse,
+    GetApiConversationError,
+    GetApiConversationResponse,
+    ReturnType<typeof getApiConversationQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiConversation({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiConversationQueryKey(options),
+  })
+
+/**
+ * Start a conversation
+ */
+export const postApiConversationMutation = (
+  options?: Partial<Options<PostApiConversationData>>,
+): UseMutationOptions<
+  PostApiConversationResponse,
+  PostApiConversationError,
+  Options<PostApiConversationData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiConversationResponse,
+    PostApiConversationError,
+    Options<PostApiConversationData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postApiConversation({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getApiConversationByIdQueryKey = (options: Options<GetApiConversationByIdData>) =>
+  createQueryKey('getApiConversationById', options)
+
+/**
+ * Get a conversation
+ */
+export const getApiConversationByIdOptions = (options: Options<GetApiConversationByIdData>) =>
+  queryOptions<
+    GetApiConversationByIdResponse,
+    GetApiConversationByIdError,
+    GetApiConversationByIdResponse,
+    ReturnType<typeof getApiConversationByIdQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiConversationById({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiConversationByIdQueryKey(options),
+  })
+
+export const getApiConversationByIdMessageQueryKey = (
+  options: Options<GetApiConversationByIdMessageData>,
+) => createQueryKey('getApiConversationByIdMessage', options)
+
+/**
+ * List a conversation's messages
+ */
+export const getApiConversationByIdMessageOptions = (
+  options: Options<GetApiConversationByIdMessageData>,
+) =>
+  queryOptions<
+    GetApiConversationByIdMessageResponse,
+    GetApiConversationByIdMessageError,
+    GetApiConversationByIdMessageResponse,
+    ReturnType<typeof getApiConversationByIdMessageQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiConversationByIdMessage({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiConversationByIdMessageQueryKey(options),
+  })
+
+/**
+ * Send a message
+ */
+export const postApiConversationByIdMessageMutation = (
+  options?: Partial<Options<PostApiConversationByIdMessageData>>,
+): UseMutationOptions<
+  PostApiConversationByIdMessageResponse,
+  PostApiConversationByIdMessageError,
+  Options<PostApiConversationByIdMessageData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiConversationByIdMessageResponse,
+    PostApiConversationByIdMessageError,
+    Options<PostApiConversationByIdMessageData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postApiConversationByIdMessage({
         ...options,
         ...fnOptions,
         throwOnError: true,

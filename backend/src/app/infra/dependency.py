@@ -159,6 +159,23 @@ async def disconnect_all(
             logger.info("closed", {"resource": resource.name})
 
 
+async def sweep_lost_runs(*, logger: Logger = log) -> None:
+    """Ends the runs a previous process left active, once, after every resource is connected and
+    before the port is bound. With one replica a lost run is one that started before this process
+    booted, so one sweep finds them all; there is no job and no heartbeat a slow model turn could
+    trip. A failed sweep is logged and the boot continues, like a failed job.
+
+    Imported inside the function: the run module is above `infra` in the layer map, and nothing
+    else here reaches it.
+    """
+    from app.api.run.controller import fail_lost_runs
+
+    try:
+        await fail_lost_runs(clock.now())
+    except Exception as error:
+        logger.error("lost run sweep failed", {"step": "sweep_lost_runs"}, error)
+
+
 def resource_lifespan(
     resources: Sequence[Resource] | None = None,
     *,

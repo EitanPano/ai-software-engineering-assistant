@@ -21,6 +21,7 @@ PRODUCTION |= {
     "JWT_ACCESS_SECRET": f"{LONG_VALUE}-1",
     "JWT_REFRESH_SECRET": f"{LONG_VALUE}-2",
     "OTP_SECRET": f"{LONG_VALUE}-3",
+    "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4",
 }
 
 
@@ -182,6 +183,7 @@ class TestLoadEnv:
             "OTP_SECRET",
             "ENCRYPTION_KEY",
             "DATABASE_URL",
+            "ANTHROPIC_API_KEY",
         ]
         assert loaded.env.app_env == "development"
         assert loaded.env.port == 8000
@@ -196,7 +198,36 @@ class TestLoadEnv:
             "JWT_REFRESH_SECRET",
             "ENCRYPTION_KEY",
             "DATABASE_URL",
+            "ANTHROPIC_API_KEY",
         ]
+
+    def test_requires_the_anthropic_key_in_production_and_refuses_the_development_default(
+        self,
+    ) -> None:
+        with pytest.raises(EnvError, match="ANTHROPIC_API_KEY"):
+            load_env({**PRODUCTION, "ANTHROPIC_API_KEY": ""})
+        with pytest.raises(EnvError, match="ANTHROPIC_API_KEY: is a placeholder"):
+            load_env({**PRODUCTION, "ANTHROPIC_API_KEY": "dev-only-anthropic-key-not-real"})
+
+        loaded = load_env({**PRODUCTION, "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4"})
+        assert loaded.env.anthropic_api_key == f"{LONG_VALUE}-4"
+
+    def test_defaults_the_anthropic_key_and_model_outside_production(self) -> None:
+        loaded = load_env({})
+
+        assert "ANTHROPIC_API_KEY" in loaded.defaulted_secrets
+        assert loaded.env.llm_model == "claude-opus-5-5"
+        assert loaded.env.anthropic_base_url is None
+
+    def test_refuses_a_base_url_for_the_model_api_in_production_only(self) -> None:
+        url = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8101", "ANTHROPIC_API_KEY": LONG_VALUE}
+
+        with pytest.raises(EnvError, match="ANTHROPIC_BASE_URL: is not allowed in production"):
+            load_env({**PRODUCTION, **url})
+        assert load_env(url).env.anthropic_base_url == "http://127.0.0.1:8101"
+        assert (
+            load_env({**PRODUCTION, **url, "ANTHROPIC_BASE_URL": ""}).env.anthropic_base_url is None
+        )
 
     def test_requires_the_database_url_in_production_and_names_it(self) -> None:
         source = {name: value for name, value in PRODUCTION.items() if name != "DATABASE_URL"}
@@ -237,7 +268,7 @@ class TestLoadEnv:
         secrets = load_env({"APP_ENV": "development", "ENCRYPTION_KEY": ""}).defaulted_secrets
         expected = ["ENCRYPTION_KEY"]
         expected[:0] = ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OTP_SECRET"]
-        expected.append("DATABASE_URL")
+        expected.extend(["DATABASE_URL", "ANTHROPIC_API_KEY"])
         assert secrets == expected
 
     def test_reads_the_port_and_refuses_one_that_is_not_a_port(self) -> None:

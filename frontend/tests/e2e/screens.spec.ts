@@ -22,9 +22,26 @@ type SetupAccount = { email: string; databaseUrl: string }
 // only on `account.databaseUrl`, which is checked to end in `_e2e` (the database the e2e chain
 // prepares) and is never read from anywhere else; it is refused when `E2E_BASE_URL` points the
 // suite at a running stack, whose database is not the browser-test one.
-const SIGNED_IN_ROUTES: { route: string; setup?: (account: SetupAccount) => Promise<void> }[] = [
+// An entry with a `prepare` is a screen with a dynamic path (a created record): `route` only names
+// the file, and `prepare` makes the record through the UI and returns the path to capture.
+const SIGNED_IN_ROUTES: {
+  route: string
+  setup?: (account: SetupAccount) => Promise<void>
+  prepare?: (page: Page) => Promise<string>
+}[] = [
   { route: '/profile' },
   { route: '/forbidden' },
+  { route: '/conversation' },
+  {
+    route: '/conversation-detail',
+    // Needs no fake: starting a conversation calls no model.
+    prepare: async (page) => {
+      await page.goto('/conversation')
+      await page.getByRole('button', { name: 'Start conversation' }).click()
+      await expect(page).toHaveURL(/\/conversation\/[^/]+$/)
+      return new URL(page.url()).pathname
+    },
+  },
 ]
 
 // The screens QA reads: every route of the nav table, plus the auth screens when the server has
@@ -51,7 +68,7 @@ function slug(route: string): string {
 }
 
 // Opens the route in the theme, saves the screenshot and returns what the checks found.
-async function capture(page: Page, route: string, theme: Theme): Promise<string[]> {
+async function capture(page: Page, route: string, theme: Theme, name = route): Promise<string[]> {
   await page.goto(route)
   await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
   await page.waitForLoadState('networkidle')
@@ -59,7 +76,7 @@ async function capture(page: Page, route: string, theme: Theme): Promise<string[
 
   mkdirSync(DIRECTORY, { recursive: true })
   await page.screenshot({
-    path: `${DIRECTORY}/${slug(route)}-${test.info().project.name}-${theme}.png`,
+    path: `${DIRECTORY}/${slug(name)}-${test.info().project.name}-${theme}.png`,
     fullPage: true,
   })
   return screenProblems(page)
@@ -105,12 +122,16 @@ const HASHED = { timeout: 15_000 } // the wait after a submit that hashes a pass
 const REGISTRATION_MS = HASHED.timeout
 const MARGIN_MS = 15_000
 const CAPTURE_MS = 10_000
+const PREPARE_MS = 10_000 // making a record through the UI before its capture
 
 for (const group of groups) {
   test(`signed-in ${group.map((entry) => entry.route).join(', ')}`, async ({ page }, info) => {
     const setup = group[0]?.setup
     test.setTimeout(
-      REGISTRATION_MS * (setup ? 2 : 1) + MARGIN_MS + group.length * THEMES.length * CAPTURE_MS,
+      REGISTRATION_MS * (setup ? 2 : 1) +
+        MARGIN_MS +
+        group.filter((entry) => entry.prepare).length * PREPARE_MS +
+        group.length * THEMES.length * CAPTURE_MS,
     )
     const email = await registerThroughUi(page)
     if (setup) {
@@ -123,12 +144,13 @@ for (const group of groups) {
     }
 
     const problems: string[] = []
-    for (const { route } of group) {
+    for (const { route, prepare } of group) {
+      const path = prepare ? await prepare(page) : route
       for (const theme of THEMES) {
         await page.evaluate((value) => {
           localStorage.setItem('theme', value)
         }, theme)
-        for (const problem of await capture(page, route, theme)) {
+        for (const problem of await capture(page, path, theme, route)) {
           problems.push(`${route} (${theme}): ${problem}`)
         }
       }

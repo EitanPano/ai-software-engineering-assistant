@@ -78,19 +78,21 @@ src/app/
   config/             env.py · constants.py · cors.py · routes.py
   api/<name>/         routes · controller · schema; service only when the module has data
                       (model.py: reserved, for an engine that defines storage in code)
-                      (health, auth, user, module: the commented reference)
-  models/<name>/      interface · type · enums · constants (auth, session, user, module)
+                      (health, auth, user, module: the commented reference; conversation, run:
+                      the chat; agent: the loop, a controller only)
+  models/<name>/      interface · type · enums · constants (auth, session, user, module,
+                      conversation, run)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
                       asgi (helpers the ASGI middleware share)
                       rate_limit · auth · role (the gates)
-  services/           logger.py · db.py · cache.py · session.py · event.py
+  services/           logger.py · db.py · cache.py · session.py · event.py · anthropic.py · tool.py
     security/         crypto · jwt · cookies · otp
     communicate/      __init__.py · console · mail · sms · whatsapp · templates/
     utils/            error · openapi · clock · api_model · pagination · postgres_error (pure, no I/O)
   infra/              dependency.py · loop.py · memory.py · postgres.py · pubsub.py · scheduler.py
     jobs/             one file per background job: session_cleanup
-    subscribers/      one file per event reaction: send_welcome
+    subscribers/      one file per event reaction: send_welcome, execute_run
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
     scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db); seed is reserved
 tests/                mirrors src/app/ (a package throughout, so two test_x.py cannot clash)
@@ -345,6 +347,25 @@ changes only by plan.
 - Background: `infra/jobs/session_cleanup.py` purges dead sessions hourly;
   `infra/subscribers/send_welcome.py` mails a new account on `user.registered`, published by the
   user controller's `create_user`.
+
+## The agent
+
+- Endpoints: `POST|GET /api/conversation`, `GET /api/conversation/{id}`,
+  `GET|POST /api/conversation/{id}/message` (the send is limited per user, `require_auth` declared
+  before the limiter because its key is the caller) and `GET /api/run/{id}/event` (SSE, replays from
+  `Last-Event-ID`; its item type is `RunEvent`, which `openapi.py` moves from `itemSchema` to
+  `schema`).
+- A send claims the conversation's one active `run` (a partial unique index; a second claim is a
+  409), stores the message and publishes `run.created`; `infra/subscribers/execute_run.py` calls
+  `api/agent/controller.py › execute_run`, the hand-written loop. Every step is a `run_event`,
+  appended through one writer per run so sequences commit in order; the stream polls the table.
+- `services/anthropic.py` is the only importer of the SDK; `services/tool.py` is the default-deny
+  seam (its registry is empty in production). A run lost with its process ends as `interrupted` in
+  `sweep_lost_runs` (`infra/dependency.py`), called by `main.py`'s lifespan once every resource is
+  connected.
+- Tests run on `tests/fake_anthropic.py`, a scripted fake of `POST /v1/messages` (markers in the
+  user's message pick the script; `python -m tests.fake_anthropic` serves it on 8101 for e2e, and
+  `ANTHROPIC_BASE_URL` points the API at it). `tests/agent_support.py` reaches it in process.
 
 ## The engine seam
 

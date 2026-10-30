@@ -14,8 +14,10 @@ from app.infra.pubsub import SubscriberEntry, Unsubscribe, pubsub
 
 __all__ = [
     "MODULE_CREATED",
+    "RUN_CREATED",
     "USER_REGISTERED",
     "ModuleCreated",
+    "RunCreated",
     "Topic",
     "Unsubscribe",
     "UserRegistered",
@@ -47,6 +49,14 @@ class UserRegistered(TypedDict):
 
 
 USER_REGISTERED: Final = Topic[UserRegistered]("user.registered")
+
+
+class RunCreated(TypedDict):
+    run_id: str
+
+
+# Published by the conversation controller after a send; the agent executes the run.
+RUN_CREATED: Final = Topic[RunCreated]("run.created")
 
 
 async def publish[P](topic: Topic[P], payload: P) -> None:

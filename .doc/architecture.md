@@ -41,9 +41,10 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
    Assistant content blocks are stored unchanged and history is append-only, as the API
    requires of thinking blocks.
 8. Streaming: the loop writes every step as a `run_event`; the SSE endpoint reads them, so a
-   client reconnects and replays from the last event it saw. One replica only until a queue
-   replaces the background task; a crash fails the turn in progress and pending approvals
-   survive.
+   client reconnects and replays from the last event it saw. A stream polls `run_event` and ends
+   cleanly after 60 s, and the client reopens it with `Last-Event-ID`. One replica only until a
+   queue replaces the background task; a crash fails the turn in progress, the next boot's sweep
+   ends that lost run as `interrupted`, and pending approvals survive.
 9. Tools: the backend is the MCP client, never Anthropic's MCP connector, whose tool calls run
    on Anthropic's side where the approval gate cannot intercept them. `tool_policy` decides each
    call: allow, ask or deny. A tool with no policy is denied.
@@ -83,8 +84,9 @@ Planned; each task's migration creates its tables and the code wins on conflict.
 `session` ship with the template.
 
 - `conversation`: owner `user`; title.
-- `message`: `conversation`; role, content blocks (JSONB).
-- `run`: `conversation`; status, model, token usage.
+- `message`: `conversation`, `run`; position, role (`user`, `assistant`, `tool_result`), content
+  blocks (JSONB), text.
+- `run`: `conversation`, owner `user`; status, error code. No model or token usage yet.
 - `run_event`: `run`; sequence number, type, payload (JSONB).
 - `tool_call`: `run`; `mcp_server`, tool name, arguments, result, status.
 - `approval`: `tool_call`; decision, deciding `user`, reason.
@@ -151,7 +153,7 @@ None in the template. A vendor goes in `services/<vendor>` and is selected by
 
 | Service | Wrapped in | Configured by |
 | --- | --- | --- |
-| Anthropic API (`claude-opus-5-5`; the agent, memory extraction and the eval judge) | `services/anthropic` | `ANTHROPIC_API_KEY`, `LLM_MODEL` |
+| Anthropic API (`claude-opus-5-5`; the agent, memory extraction and the eval judge) | `services/anthropic` | `ANTHROPIC_API_KEY`, `LLM_MODEL`; `ANTHROPIC_BASE_URL` points tests at the fake and is refused in production |
 | Voyage AI embeddings (`voyage-code-4`) | `services/voyage` | `VOYAGE_API_KEY` |
 | GitHub MCP server | the MCP client, as an `mcp_server` row | `GITHUB_TOKEN`, held by its Compose service |
 
@@ -194,6 +196,13 @@ eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-30: conversations and agent runs. Routes `POST` and `GET /api/conversation`,
+  `GET /api/conversation/{id}`, `GET` and `POST /api/conversation/{id}/message` and the SSE stream
+  `GET /api/run/{id}/event`; all owner only, another user's record is a 404. Tables `conversation`,
+  `message`, `run` and `run_event` (`0002-conversation.sql`). Limits per user, per 15 min: 30 sends,
+  60 stream opens. The Anthropic API is a new external dependency; the real model is offered no
+  tools until the task that adds the `knowledge` MCP server. The loop's tool path denies anything
+  unregistered.
 - 2026-10-30: the `backend` Compose service gains a healthcheck on `/api/health/ready`; CI runs
   `verify`, a production-image start and a secret scan on every push.
 - 2026-10-30: initial architecture accepted; react-python-fastapi, deploy single, Postgres 17.

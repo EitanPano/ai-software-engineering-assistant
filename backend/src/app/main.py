@@ -22,7 +22,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from app.config.env import defaulted_secrets, env
-from app.infra.dependency import resource_lifespan
+from app.infra.dependency import resource_lifespan, sweep_lost_runs
 from app.server import create_app
 from app.services.logger import configure_logging, log
 
@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     for name in defaulted_secrets:
         log.warning("using a development default for a secret", {"variable": name})
     async with resource_lifespan()(app):
+        # Every resource is connected and the port is not bound yet: no client can open a stream
+        # on a lost run before its `run_finished` is written.
+        await sweep_lost_runs()
         yield
 
 

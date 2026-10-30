@@ -161,9 +161,10 @@ def create_pubsub(
 # module load, and a subscriber that publishes can import `services/event.py`, which imports this
 # module.
 def _subscribers() -> Sequence[SubscriberEntry]:
+    from app.infra.subscribers.execute_run import execute_run_on_created
     from app.infra.subscribers.send_welcome import send_welcome
 
-    return [send_welcome]
+    return [send_welcome, execute_run_on_created]
 
 
 pubsub: Final = create_pubsub(subscribers=_subscribers)

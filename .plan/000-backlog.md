@@ -18,7 +18,7 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] user can chat with the agent and watch the response stream
+- [ ] drop the reference module
 - [ ] user can connect a GitHub repository to the knowledge base
 - [ ] user can search the knowledge base with hybrid search
 - [ ] admin can measure retrieval quality with an eval run
@@ -28,7 +28,14 @@ Example: `- [ ] user can sign in with email`
 - [ ] agent remembers long-term knowledge across conversations
 - [ ] agent returns schema-validated structured results
 - [ ] admin can measure answer correctness with an eval run
+- [ ] agent runs have a spend cap
+- [ ] user can delete a conversation
+- [ ] user can stop a running agent
+- [ ] user can load earlier messages in a conversation
+- [ ] user can see a finished run's tool calls after a reload
 
 ## DONE
 
 <!-- moved here by the dev loop with the date and the plan number -->
+
+- [x] user can chat with the agent and watch the response stream (2026-10-30, plan 001)

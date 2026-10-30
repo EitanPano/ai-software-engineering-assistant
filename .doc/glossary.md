@@ -14,10 +14,11 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | module (reference) | The shipped CRUD module `api/module/` that a developer copies | `api/module/`, `models/module/` |
 | user | A person with an account, role `user` or `admin` | table `user`, route `/api/user`, module `user` |
 | conversation | One chat thread owned by a user; never called a session, which is a refresh-token record | table `conversation`, route `/api/conversation`, module `conversation` |
-| message | One turn in a conversation; together they are its conversation history | table `message` |
+| message | One turn in a conversation; together they are its conversation history. Roles: `user`, `assistant` and `tool_result`, which the API receives as `user` and the wire never shows | table `message` |
 | agent | The loop that reads a conversation, calls tools and writes the answer | module `agent` |
 | run | One execution of the agent for one user message | table `run`, route `/api/run`, module `run` |
 | run event | One persisted step of a run, streamed over SSE and replayed on reconnect | table `run_event` |
+| lost run | A run still active whose process is gone, ended as `interrupted` by the sweep at the next boot | `fail_lost_runs` in module `run` |
 | tool call | One request by the agent to execute a tool, with its arguments and result | table `tool_call` |
 | approval | A human's decision on a tool call | table `approval`, route `/api/approval`, module `approval` |
 | tool policy | The rule that allows, asks about or denies a tool | table `tool_policy`, route `/api/tool-policy`, module `tool_policy` |
@@ -33,6 +34,8 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | approve | Allow a pending tool call to execute | `feature/approve` |
 | reject | Refuse a pending tool call; the agent receives a denied result | `feature/reject` |
 | connect | Add a source and index it | `feature/connect` |
+| start | Begin a new empty conversation | `feature/start-conversation` |
+| send | Add a user message to a conversation and start a run | `feature/send-message` |
 
 ## Actions
 

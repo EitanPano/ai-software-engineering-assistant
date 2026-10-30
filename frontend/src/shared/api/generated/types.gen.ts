@@ -36,6 +36,53 @@ export type AuthTokens = {
 }
 
 /**
+ * Conversation
+ */
+export type Conversation = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Title
+   */
+  title: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * ConversationDetail
+ */
+export type ConversationDetail = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Title
+   */
+  title: string | null
+  createdAt: string
+  updatedAt: string
+  latestRun: Run | null
+}
+
+/**
+ * ConversationPage
+ */
+export type ConversationPage = {
+  /**
+   * Items
+   */
+  items: Array<Conversation>
+  /**
+   * Nextcursor
+   */
+  nextCursor: string | null
+}
+
+/**
  * CreateModuleBody
  */
 export type CreateModuleBody = {
@@ -110,6 +157,40 @@ export type LogoutBody = {
    * All
    */
   all?: boolean
+}
+
+/**
+ * Message
+ */
+export type Message = {
+  /**
+   * Id
+   */
+  id: string
+  role: 'user' | 'assistant'
+  /**
+   * Text
+   */
+  text: string
+  /**
+   * Runid
+   */
+  runId: string | null
+  createdAt: string
+}
+
+/**
+ * MessagePage
+ */
+export type MessagePage = {
+  /**
+   * Items
+   */
+  items: Array<Message>
+  /**
+   * Nextcursor
+   */
+  nextCursor: string | null
 }
 
 /**
@@ -244,6 +325,140 @@ export type RefreshBody = {
    * Refreshtoken
    */
   refreshToken?: string
+}
+
+/**
+ * Run
+ */
+export type Run = {
+  /**
+   * Id
+   */
+  id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  errorCode:
+    | 'refused'
+    | 'truncated'
+    | 'turn_limit'
+    | 'upstream_unavailable'
+    | 'interrupted'
+    | 'internal'
+    | null
+  createdAt: string
+}
+
+/**
+ * RunEvent
+ */
+export type RunEvent =
+  | {
+      /**
+       * Type
+       */
+      type?: 'run_started'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+    }
+  | {
+      /**
+       * Type
+       */
+      type?: 'text_delta'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+      /**
+       * Text
+       */
+      text: string
+    }
+  | {
+      /**
+       * Type
+       */
+      type?: 'tool_call_started'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+      /**
+       * Tooluseid
+       */
+      toolUseId: string
+      /**
+       * Name
+       */
+      name: string
+      /**
+       * Input
+       */
+      input: {
+        [key: string]: unknown
+      }
+    }
+  | {
+      /**
+       * Type
+       */
+      type?: 'tool_call_finished'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+      /**
+       * Tooluseid
+       */
+      toolUseId: string
+      status: 'succeeded' | 'failed' | 'denied'
+      /**
+       * Output
+       */
+      output: string
+    }
+  | {
+      /**
+       * Type
+       */
+      type?: 'run_finished'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+      /**
+       * Status
+       */
+      status: 'completed' | 'failed'
+      errorCode:
+        | 'refused'
+        | 'truncated'
+        | 'turn_limit'
+        | 'upstream_unavailable'
+        | 'interrupted'
+        | 'internal'
+        | null
+    }
+
+/**
+ * SendMessageBody
+ */
+export type SendMessageBody = {
+  content: string
+}
+
+/**
+ * SentMessage
+ */
+export type SentMessage = {
+  message: Message
+  run: Run
 }
 
 /**
@@ -919,3 +1134,278 @@ export type PatchApiModuleByIdResponses = {
 
 export type PatchApiModuleByIdResponse =
   PatchApiModuleByIdResponses[keyof PatchApiModuleByIdResponses]
+
+export type GetApiConversationData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Cursor
+     */
+    cursor?: string
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: '/api/conversation'
+}
+
+export type GetApiConversationErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiConversationError = GetApiConversationErrors[keyof GetApiConversationErrors]
+
+export type GetApiConversationResponses = {
+  /**
+   * A page of the caller's conversations, latest activity first
+   */
+  200: ConversationPage
+}
+
+export type GetApiConversationResponse =
+  GetApiConversationResponses[keyof GetApiConversationResponses]
+
+export type PostApiConversationData = {
+  body?: never
+  path?: never
+  query?: never
+  url: '/api/conversation'
+}
+
+export type PostApiConversationErrors = {
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type PostApiConversationError = PostApiConversationErrors[keyof PostApiConversationErrors]
+
+export type PostApiConversationResponses = {
+  /**
+   * The created conversation
+   */
+  201: Conversation
+}
+
+export type PostApiConversationResponse =
+  PostApiConversationResponses[keyof PostApiConversationResponses]
+
+export type GetApiConversationByIdData = {
+  body?: never
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/conversation/{id}'
+}
+
+export type GetApiConversationByIdErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiConversationByIdError =
+  GetApiConversationByIdErrors[keyof GetApiConversationByIdErrors]
+
+export type GetApiConversationByIdResponses = {
+  /**
+   * The conversation and its latest run
+   */
+  200: ConversationDetail
+}
+
+export type GetApiConversationByIdResponse =
+  GetApiConversationByIdResponses[keyof GetApiConversationByIdResponses]
+
+export type GetApiConversationByIdMessageData = {
+  body?: never
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: {
+    /**
+     * Cursor
+     */
+    cursor?: string
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: '/api/conversation/{id}/message'
+}
+
+export type GetApiConversationByIdMessageErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiConversationByIdMessageError =
+  GetApiConversationByIdMessageErrors[keyof GetApiConversationByIdMessageErrors]
+
+export type GetApiConversationByIdMessageResponses = {
+  /**
+   * A page of messages, newest first
+   */
+  200: MessagePage
+}
+
+export type GetApiConversationByIdMessageResponse =
+  GetApiConversationByIdMessageResponses[keyof GetApiConversationByIdMessageResponses]
+
+export type PostApiConversationByIdMessageData = {
+  body?: SendMessageBody
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/conversation/{id}/message'
+}
+
+export type PostApiConversationByIdMessageErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Rate limited
+   */
+  429: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type PostApiConversationByIdMessageError =
+  PostApiConversationByIdMessageErrors[keyof PostApiConversationByIdMessageErrors]
+
+export type PostApiConversationByIdMessageResponses = {
+  /**
+   * The stored message and the run that answers it
+   */
+  201: SentMessage
+}
+
+export type PostApiConversationByIdMessageResponse =
+  PostApiConversationByIdMessageResponses[keyof PostApiConversationByIdMessageResponses]
+
+export type GetApiRunByIdEventData = {
+  body?: never
+  headers?: {
+    /**
+     * Last-Event-Id
+     */
+    'Last-Event-ID'?: number | null
+  }
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/run/{id}/event'
+}
+
+export type GetApiRunByIdEventErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Rate limited
+   */
+  429: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiRunByIdEventError = GetApiRunByIdEventErrors[keyof GetApiRunByIdEventErrors]
+
+export type GetApiRunByIdEventResponses = {
+  /**
+   * The run's events as server-sent events; each `id` is the sequence
+   */
+  200: RunEvent
+}
+
+export type GetApiRunByIdEventResponse =
+  GetApiRunByIdEventResponses[keyof GetApiRunByIdEventResponses]

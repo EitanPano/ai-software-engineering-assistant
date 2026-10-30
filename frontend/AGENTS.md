@@ -314,6 +314,17 @@ inline` maps them to utilities (`bg-primary`, `text-muted-foreground`) and `@cus
   run about once per 15 minutes per stack, and it leaves its accounts in that stack's `app`
   database. The catalog's case runner brings a stack up and down with its volumes, so it is
   unaffected.
+- **The Anthropic fake.** `playwright.config.ts` starts a third web server, `python -m
+tests.fake_anthropic` from `backend/` on port 8101, before the API, and points the API at it
+  (`ANTHROPIC_BASE_URL`, with a placeholder key). A journey picks the fake's script by markers in
+  the message it sends (`tests/e2e/conversation-support.ts` names them), so parallel journeys stay
+  apart. A Compose stack has no fake: `conversation.spec.ts` registers nothing when `E2E_BASE_URL`
+  is set, and `screens.spec.ts` captures only screens that call no model.
+- **Streams.** `entity/run/api/run.ts` (`streamRun`) owns the SSE reconnection: the generated
+  client runs one connection at a time (`sseMaxRetryAttempts: 1`) and the loop reopens with
+  `Last-Event-ID`, bounded on consecutive connections that bring nothing new. `entity/run/model.ts`
+  folds events into a view and ignores a `sequence` it has seen. Unit tests stub `fetch` with an
+  SSE `Response`. Assistant text renders only through `shared/ui/markdown.tsx` (no raw HTML).
 - **Projects.** `phone` (`devices['Pixel 7']`, touch) runs every journey with its axe scan;
   `desktop` (`devices['Desktop Chrome']`) runs `shell.spec.ts` and `screens.spec.ts`. A check that
   belongs to one of them is tagged `{ tag: '@phone' }` or `{ tag: '@desktop' }` and the other

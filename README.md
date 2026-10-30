@@ -29,7 +29,7 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 - Agentic RAG: the agent decides when to retrieve more information (planned)
 - Persistent agent memory: conversation history distinct from long-term knowledge (planned)
 - Tool execution permissions: human approval for sensitive actions (planned)
-- Streaming responses: intermediate tool activity shown as it happens (planned)
+- Streaming responses: intermediate tool activity shown as it happens
 - Evaluation pipelines: retrieval quality and answer correctness measured (planned)
 - Structured outputs: results validated against schemas (planned)
 
@@ -101,6 +101,9 @@ docker compose --profile app up --build
 | `MAIL_FROM` | backend: Sender address. Required when MAIL_PROVIDER is not console. | `no-reply@example.com` |
 | `JOBS_ENABLED` | backend: Run the scheduled jobs in this process: true or false. | `true` |
 | `RATE_LIMIT_SCALE` | backend: Multiplies every rate limit (1 to 1000). Production keeps 1; an e2e run raises it so a journey suite is not limited. There is no switch that turns limiting off. | `1` |
+| `ANTHROPIC_API_KEY` | backend: Anthropic API key for the agent. Required in production; a fake default applies elsewhere, and tests and e2e run on a scripted fake. | — |
+| `LLM_MODEL` | backend: The model the agent runs on, without a date suffix. | `claude-opus-5-5` |
+| `ANTHROPIC_BASE_URL` | backend: Points the SDK at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
 | `DATABASE_URL` | backend: database/postgres provider Postgres connection URL. Required in production; outside production it defaults to the local service. Tests (testDb) use postgres://app:app@127.0.0.1:5432/app_test; override with TEST_DATABASE_URL. Browser tests (e2eDb) use postgres://app:app@127.0.0.1:5432/app_e2e; override with E2E_DATABASE_URL. | `postgres://app:app@127.0.0.1:5432/app` |
 <!-- configuration:end -->
 

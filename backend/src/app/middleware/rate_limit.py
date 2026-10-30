@@ -20,7 +20,7 @@ from typing import Final
 from fastapi import Request
 
 from app.config.env import env
-from app.middleware.context import client_ip_of
+from app.middleware.context import caller_of, client_ip_of
 from app.services import cache
 from app.services.utils import clock
 from app.services.utils.error import AppError
@@ -73,6 +73,13 @@ async def by_ip(request: Request) -> str:
     """Only right behind a proxy that forwards X-Forwarded-For when `TRUST_PROXY` trusts it
     (`middleware/proxy.py`); otherwise every client shares the proxy's address."""
     return rate_limit_subject(client_ip_of(request.scope))
+
+
+async def by_caller(request: Request) -> str | None:
+    """The signed-in caller's id. Declare `require_auth` before this limiter: without a caller
+    there is no subject, and the limit is skipped (the auth gate has already answered 401)."""
+    caller = caller_of(request.scope)
+    return None if caller is None else caller.id
 
 
 def rate_limit_subject(address: str) -> str:

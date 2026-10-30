@@ -72,6 +72,40 @@ class TestTheCommittedContract:
         assert text == json.dumps(build_openapi_document(app), indent=2, ensure_ascii=False) + "\n"
 
 
+class TestRunEventStream:
+    def test_types_the_stream_as_run_event_under_schema_not_item_schema(self) -> None:
+        doc = build_openapi_document(app)
+
+        get = as_object(as_object(as_object(doc["paths"])["/api/run/{id}/event"])["get"])
+        content = as_object(as_object(as_object(get["responses"])["200"])["content"])
+        stream = as_object(content["text/event-stream"])
+        assert "itemSchema" not in stream
+        assert stream["schema"] == {"$ref": "#/components/schemas/RunEvent"}
+        variants = as_object(as_object(as_object(doc["components"])["schemas"])["RunEvent"])
+        assert isinstance(variants["oneOf"], list)
+        assert len(variants["oneOf"]) == 5
+
+    def test_documents_the_last_event_id_header_and_the_errors(self) -> None:
+        doc = build_openapi_document(app)
+
+        get = as_object(as_object(as_object(doc["paths"])["/api/run/{id}/event"])["get"])
+        assert isinstance(get["parameters"], list)
+        header = next(
+            as_object(p) for p in get["parameters"] if as_object(p)["name"] == "Last-Event-ID"
+        )
+        assert header["in"] == "header"
+        assert set(as_object(get["responses"])) == {"200", "400", "401", "404", "429", "500"}
+
+    def test_documents_the_send_with_its_429(self) -> None:
+        doc = build_openapi_document(app)
+
+        post = as_object(
+            as_object(as_object(doc["paths"])["/api/conversation/{id}/message"])["post"]
+        )
+        expected = {"201", "400", "401", "404", "409", "429", "500"}
+        assert set(as_object(post["responses"])) == expected
+
+
 class TestTheDocument:
     def test_documents_the_health_endpoint_and_the_error_envelope(self) -> None:
         doc = build_openapi_document(app)
@@ -196,6 +230,15 @@ class TestTheShaping:
                 "OtpVerificationBody",
                 "UpdateMeBody",
                 "UserPage",
+                "Run",
+                "RunEvent",
+                "Conversation",
+                "ConversationDetail",
+                "ConversationPage",
+                "Message",
+                "MessagePage",
+                "SendMessageBody",
+                "SentMessage",
             }
         )
 

@@ -56,6 +56,15 @@ COMPONENTS: Final = frozenset(
         "OtpVerificationBody",
         "UpdateMeBody",
         "UserPage",
+        "Run",
+        "RunEvent",
+        "Conversation",
+        "ConversationDetail",
+        "ConversationPage",
+        "Message",
+        "MessagePage",
+        "SendMessageBody",
+        "SentMessage",
     }
 )
 
@@ -133,6 +142,26 @@ def _unwrap_optional_body(operation: Json) -> None:
             body["schema"] = next(option for option in options if option != {"type": "null"})
 
 
+def _stream_item_as_schema(operation: Json) -> None:
+    """FastAPI documents an SSE stream's items as OpenAPI 3.2's `itemSchema`, with the event type
+    in `data.contentSchema`. The frontend's generator ignores `itemSchema` and types the stream
+    `unknown`, so the event type moves to the media type's `schema`, which it reads."""
+    for status, response in _object(operation.get("responses")).items():
+        content = _object(_object(response).get("content"))
+        if not status.startswith("2") and "text/event-stream" in content:
+            # The route's response class names its media type on the error entries too; an error
+            # is the JSON envelope.
+            content["application/json"] = content.pop("text/event-stream")
+            continue
+        media = _object(content.get("text/event-stream"))
+        item = media.pop("itemSchema", None)
+        content_schema = _object(_object(_object(item).get("properties")).get("data")).get(
+            "contentSchema"
+        )
+        if content_schema is not None:
+            media["schema"] = content_schema
+
+
 def shape_document(document: Json, *, components: frozenset[str]) -> Json:
     """The shaped copy of a generated document; the argument is left as it was."""
     shaped = copy.deepcopy(document)
@@ -146,6 +175,7 @@ def shape_document(document: Json, *, components: frozenset[str]) -> Json:
             _object(body.get("responses")).pop("422", None)
             _object(body.get("requestBody")).pop("required", None)
             _unwrap_optional_body(body)
+            _stream_item_as_schema(body)
 
     schemas = _object(_object(shaped.get("components")).get("schemas"))
     for name in _VALIDATION_COMPONENTS:

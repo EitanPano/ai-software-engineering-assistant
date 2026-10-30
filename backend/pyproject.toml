@@ -3,11 +3,14 @@ name = "app"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+  "anthropic>=2.3,<3",
   "anyio>=4.15",
   "apscheduler>=3.11,<4",
   "argon2-cffi>=25.1",
   "cryptography>=50",
   "fastapi>=0.161",
+  # The SDK's HTTP client; named here because services/anthropic.py catches its transport errors.
+  "httpx2>=2.16",
   "psycopg[binary,pool]>=3.3",
   "pydantic>=2.14",
   "pyjwt>=2.15",
@@ -118,7 +121,12 @@ layers = [
 # The bus lists its subscribers inside a function, and a subscriber calls a controller (which
 # publishes through the bus), so import-linter sees a path from services up to api through the
 # lists. The bus never imports a subscriber at load: the import runs when it connects.
-ignore_imports = ["app.infra.pubsub -> app.infra.subscribers.send_welcome"]
+ignore_imports = [
+  "app.infra.pubsub -> app.infra.subscribers.send_welcome",
+  "app.infra.pubsub -> app.infra.subscribers.execute_run",
+  # The boot sweep imports the run rule inside its function, after every resource is connected.
+  "app.infra.dependency -> app.api.run.controller",
+]
 
 # Leaves: models/ imports models/ only (not even pydantic: the wire shape is in a module's schema).
 [[tool.importlinter.contracts]]
@@ -429,6 +437,9 @@ source_modules = [
 ]
 forbidden_modules = ["app.api"]
 allow_indirect_imports = true
+# The boot sweep (`sweep_lost_runs`) is the one place `dependency.py` reaches a module.
+ignore_imports = ["app.infra.dependency -> app.api.run.controller"]
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "infra files import logger, db, cache, event and utils only"
@@ -573,6 +584,8 @@ type = "independence"
 modules = ["app.api.*"]
 ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.send_welcome",
+  "app.infra.pubsub -> app.infra.subscribers.execute_run",
+  "app.infra.dependency -> app.api.run.controller",
   "app.api.*.controller -> app.api.*.controller",
   "app.api.*.controller -> app.api.*.schema",
   "app.api.*.schema -> app.api.*.schema",

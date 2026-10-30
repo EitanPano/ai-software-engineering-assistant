@@ -31,6 +31,8 @@ services:
       # until the cache task (the cache, rate limits and the bus live in one process).
       JOBS_ENABLED: ${JOBS_ENABLED:-true}
       DATABASE_URL: ${DATABASE_URL-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
+      LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
     # Single: the server is the public edge, so it publishes on every interface. With TRUST_PROXY
     # false no caller can choose its own client IP through X-Forwarded-For.
     ports: [ "8000:8000" ]
@@ -75,6 +77,8 @@ services:
       # until the cache task (the cache, rate limits and the bus live in one process).
       JOBS_ENABLED: ${JOBS_ENABLED:-true}
       DATABASE_URL: ${DATABASE_URL-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
+      LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
     command: python -m app.infra.scripts.migrate
     restart: "no"
     profiles:

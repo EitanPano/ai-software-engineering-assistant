@@ -17,6 +17,8 @@ const databaseUrl = external
   ? ''
   : e2eDatabaseUrl(process.env.E2E_DATABASE_URL, 'postgres://app:app@127.0.0.1:5432/app_e2e')
 
+const FAKE_PORT = 8101
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -44,6 +46,17 @@ export default defineConfig({
     ? undefined
     : [
         {
+          // The scripted Anthropic fake (backend/tests/fake_anthropic.py): an ASGI app speaking the
+          // Messages API's SSE wire format, so the SDK's real stream handling runs in e2e with no
+          // network and no key. It listens before the API starts; a journey picks its script by
+          // markers in the message it sends.
+          command: 'uv run python -m tests.fake_anthropic',
+          cwd: '../backend',
+          url: `http://127.0.0.1:${FAKE_PORT}/health`,
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
+        {
           // A fresh API every run (never a leftover one with someone's data), with its limits
           // scaled so the suite does not trip them. Playwright starts web servers before its
           // global setup, so the browser-test database is prepared in the same command, before
@@ -55,6 +68,10 @@ export default defineConfig({
           timeout: 120_000,
           env: {
             RATE_LIMIT_SCALE: '100',
+            // The SDK talks to the fake; the key is a placeholder it never checks (and is not
+            // shaped like a real one).
+            ANTHROPIC_BASE_URL: `http://127.0.0.1:${FAKE_PORT}`,
+            ANTHROPIC_API_KEY: 'e2e-placeholder-not-a-key',
             E2E_DATABASE_URL: databaseUrl,
             DATABASE_URL: databaseUrl,
           },

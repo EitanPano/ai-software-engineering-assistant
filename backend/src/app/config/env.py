@@ -50,9 +50,12 @@ _SECRET_NAMES: Final = (
     "OTP_SECRET",
     "ENCRYPTION_KEY",
     "DATABASE_URL",
+    "ANTHROPIC_API_KEY",
 )
 
 _DEVELOPMENT_DEFAULTS: Final = {
+    # Not a real key and not shaped like one: development and every test run on the scripted fake.
+    "ANTHROPIC_API_KEY": "dev-only-anthropic-key-not-real",
     "JWT_ACCESS_SECRET": "dev-only-access-secret-change-me-0123456789",
     "JWT_REFRESH_SECRET": "dev-only-refresh-secret-change-me-012345678",
     "OTP_SECRET": "dev-only-otp-secret-change-me-0123456789abc",
@@ -69,6 +72,7 @@ _BLANK_IS_UNSET: Final = (
     "MAIL_FROM",
     "STATIC_DIR",
     "TRUST_PROXY",
+    "ANTHROPIC_BASE_URL",
 )
 
 _MIN_SECRET_LENGTH: Final = 32
@@ -185,6 +189,11 @@ class Env(BaseModel):
     # Multiplies every limit in RATE_LIMITS (middleware/rate_limit.py). An e2e run sets it so a
     # journey suite is not limited; production keeps 1. At most 1000, so no value is a bypass.
     rate_limit_scale: Annotated[float, Field(ge=1, le=1000, allow_inf_nan=False)] = 1
+    anthropic_api_key: Annotated[str, Field(min_length=1)]
+    # No date suffix (`.doc/conventions.md`, Claude API).
+    llm_model: Annotated[str, Field(min_length=1)] = "claude-opus-5-5"
+    # Points the SDK at another server: the scripted fake in tests and e2e. Refused in production.
+    anthropic_base_url: Annotated[str, Field(min_length=1)] | None = None
 
 
 @dataclass(frozen=True)
@@ -245,6 +254,8 @@ def load_env(source: Mapping[str, str]) -> LoadedEnv:
         raise EnvError(
             "invalid environment: MAIL_FROM: is required when MAIL_PROVIDER is not console"
         )
+    if production and parsed.anthropic_base_url:
+        raise EnvError("invalid environment: ANTHROPIC_BASE_URL: is not allowed in production")
     if production and parsed.static_dir and not (parsed.static_dir / "index.html").is_file():
         raise EnvError(f"invalid environment: STATIC_DIR: {parsed.static_dir} has no index.html")
     return LoadedEnv(env=parsed, defaulted_secrets=defaulted)
