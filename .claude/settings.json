@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "$comment": "Guardrail wiring. Claude Code only reads hook and permission config from this file; a hook script in .claude/hooks/ that is not listed here never runs. See AGENTS.md. Hooks use exec form (node + args: no shell, cwd-independent through ${CLAUDE_PROJECT_DIR}) with onFailure: block, so a hook that crashes, times out or cannot start blocks the call instead of letting it through. permissions.deny is a second, prefix-matched layer that Claude Code evaluates regardless of what the hooks return; the hooks see whole command strings and catch what a prefix cannot. MCP servers are not pre-approved: add a .mcp.json and approve it once, deliberately.",
+  "permissions": {
+    "allow": [
+      "Bash(bun install*)",
+      "Bash(bun run *)",
+      "Bash(bun test*)",
+      "Bash(bun x *)",
+      "Bash(bunx *)",
+      "Bash(uv run poe *)",
+      "Bash(uv sync*)",
+      "Bash(uv lock*)",
+      "Bash(node scripts/bootstrap.mjs*)",
+      "Bash(node scripts/verify.mjs*)",
+      "Bash(node scripts/readme.mjs*)",
+      "Bash(node scripts/loop-stats.mjs*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add --intent-to-add*)",
+      "Bash(docker compose up -d *)",
+      "Bash(docker compose ps*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.development)",
+      "Read(**/.env.production)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+      "Read(~/.aws/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.npmrc)",
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(*DROP TABLE*)",
+      "Bash(*DROP DATABASE*)",
+      "PowerShell(Remove-Item -Recurse*)",
+      "PowerShell(git push --force*)",
+      "PowerShell(git push -f*)",
+      "PowerShell(git reset --hard*)",
+      "PowerShell(*DROP TABLE*)",
+      "PowerShell(*DROP DATABASE*)"
+    ],
+    "ask": [
+      "Bash(node scripts/harness-update.mjs*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/block-secret-file-access.mjs"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/block-destructive-bash.mjs"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/enforce-agent-boundaries.mjs"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ]
+  }
+}

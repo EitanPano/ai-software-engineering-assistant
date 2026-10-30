@@ -1,0 +1,67 @@
+{
+  "format": 1,
+  "version": "unreleased",
+  "repository": "https://github.com/EitanPano/fullstack-dev-harness",
+  "rootCommit": "70de9c16a76df9307b15ee4ccdeeee3897a0e34b",
+  "minCatalog": "v1.5.0",
+  "groups": {
+    "harness": [
+      ".claude/agents/**",
+      ".claude/hooks/*.mjs",
+      ".claude/hooks/lib/**",
+      ".claude/rules/**",
+      ".claude/skills/**",
+      "!.claude/skills/bootstrap-project/**",
+      ".claude/settings.json",
+      ".claude/README.md",
+      ".claude/harness.json",
+      "AGENTS.md",
+      "CLAUDE.md",
+      ".cursor/**",
+      ".github/copilot-instructions.md",
+      ".orchestrate/README.md",
+      "scripts/verify.mjs",
+      "scripts/verify/*.mjs",
+      "!scripts/verify/*.test.mjs",
+      "scripts/provenance.mjs",
+      "scripts/loop-stats.mjs",
+      "scripts/manifest.mjs",
+      "scripts/readme.mjs",
+      "scripts/harness-update.mjs"
+    ],
+    "project": [
+      "README.md",
+      ".doc/**",
+      ".plan/000-backlog.md",
+      "catalog.lock",
+      ".gitignore",
+      ".gitattributes"
+    ],
+    "dev": [
+      "CONTRIBUTING.md",
+      ".claude/hooks/test/**",
+      "**/*.test.mjs",
+      "scripts/bootstrap.mjs",
+      "scripts/history.mjs",
+      ".claude/skills/bootstrap-project/**",
+      ".plan/*.md",
+      "!.plan/000-backlog.md"
+    ]
+  },
+  "references": [
+    {
+      "file": ".claude/harness.json",
+      "names": [
+        "CONTRIBUTING.md",
+        "scripts/bootstrap.mjs",
+        "scripts/history.mjs"
+      ]
+    },
+    {
+      "file": ".claude/settings.json",
+      "names": [
+        "scripts/bootstrap.mjs"
+      ]
+    }
+  ]
+}

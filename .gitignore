@@ -1,0 +1,30 @@
+# >>> harness: replaced on harness updates, do not edit inside this block
+.claude/settings.local.json
+.claude/worktrees/
+.superpowers/
+.orchestrate/*
+!.orchestrate/README.md
+# <<< harness
+
+# >>> harness-dev: removed at setup
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# dependencies and build output
+node_modules/
+.next/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+# <<< harness-dev
