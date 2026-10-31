@@ -44,6 +44,31 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 - git
 - Docker with Compose v2
 
+### API keys
+
+The project is free and open source, but two features call paid APIs, so you bring your own keys.
+They stay in your environment.
+
+| Key | Needed for |
+| --- | --- |
+| `VOYAGE_API_KEY` | Connecting a repository and searching it |
+| `ANTHROPIC_API_KEY` | Chatting with the agent |
+
+Add a payment method to your Voyage account: its published rate limits start there, and its free
+tokens still apply. Connected code and search text go to Voyage to be embedded, so don't search for
+a secret. GitHub needs no key, because public repositories are read anonymously. Without keys the
+app still starts in development, and the test suites run on scripted fakes.
+
+Set them in your shell, or for local development keep them in `backend/.env`, which git ignores:
+
+```bash
+cd backend
+# .env holds only the lines you need, for example VOYAGE_API_KEY=...
+uv run --env-file .env python -m app.main
+```
+
+The app never loads that file by itself, so use this command when you want your keys.
+
 ### Installation
 
 ```bash
@@ -134,4 +159,4 @@ project's own agent rules are in [`.doc/conventions.md`](.doc/conventions.md).
 
 ## License
 
-No license has been chosen yet.
+Apache-2.0. See [LICENSE](LICENSE).

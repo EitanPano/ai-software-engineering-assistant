@@ -13,6 +13,18 @@ approval, streaming with visible tool activity, evaluation pipelines and structu
 When two designs both work, take the one that is explicit, measured and inspectable. Scope and
 acceptance criteria: `.doc/product-definition.md`.
 
+## Distribution
+
+Open source under Apache-2.0, and meant to be easy to run and simple to understand. Users bring
+their own Anthropic and Voyage keys; the project hosts neither. For local development only, a
+git-ignored `backend/.env` may hold them, loaded by an explicit
+`uv run --env-file .env python -m app.main`. This narrows `AGENTS.md › Security` and the line in
+`backend/AGENTS.md`: the app still loads no env file, no gate uses one, so the tests stay keyless,
+and no agent reads one, because the hook stays. Voyage stays as the embedding
+provider by decision (2026-10-31), not by default: a local model would drop one key at the cost of
+retrieval quality that nothing has measured yet. When two designs both work and neither loses
+something this file requires, take the one with fewer things to install and fewer keys to hold.
+
 ## Tooling
 
 Decided at the bootstrap. A plan may change a row by saying why; a dependency not listed here
