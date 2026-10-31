@@ -87,6 +87,8 @@ class TestClassifyPostgresError:
             errors.CannotConnectNow("the database system is starting up"),
             errors.ConnectionFailure("connection failure"),
             errors.TooManyConnections("sorry, too many clients already"),
+            # A statement over `statement_timeout` (the search sets one): safe to try later.
+            errors.QueryCanceled("canceling statement due to statement timeout"),
         ]
 
         for error in unavailable:

@@ -6,6 +6,7 @@ import { NAV } from '../../src/app/nav'
 
 import { fillSignIn, registerThroughUi, signOutThroughUi } from './auth-support'
 import { capturedRoutes } from './screen-routes'
+import { LONG_LINE_QUERY, expectHit } from './search-support'
 import { REPOSITORY, connectRepository, grantAdmin, sourceRow, uniqueToken } from './source-support'
 import { screenProblems } from './support'
 
@@ -51,6 +52,24 @@ const SIGNED_IN_ROUTES: {
     },
   },
   { route: '/source/connect', setup: grantAdmin },
+  // The empty state before a search. The route is in the nav, so it is captured here signed in.
+  { route: '/search' },
+  {
+    // Results need a Ready source, so the account is promoted to connect one; `/search-result`
+    // only names the file. The long-line query returns the 6,000-character unbroken piece, so
+    // the scan sees whether a chunk scrolls the page sideways.
+    route: '/search-result',
+    setup: grantAdmin,
+    prepare: async (page) => {
+      const repository = REPOSITORY.fixture(uniqueToken())
+      await connectRepository(page, repository)
+      await expect(sourceRow(page, repository).getByText('Ready')).toBeVisible({ timeout: 30_000 })
+      const path = `/search?q=${LONG_LINE_QUERY}`
+      await page.goto(path)
+      await expectHit(page, LONG_LINE_QUERY)
+      return path
+    },
+  },
   {
     route: '/conversation-detail',
     // Needs no fake: starting a conversation calls no model.

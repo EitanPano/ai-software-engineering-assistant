@@ -18,7 +18,7 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] user can search the knowledge base with hybrid search
+- [ ] search is rate limited per user
 - [ ] admin can measure retrieval quality with an eval run
 - [ ] agent searches the knowledge base through our MCP server
 - [ ] user approves sensitive tool calls
@@ -46,3 +46,4 @@ Example: `- [ ] user can sign in with email`
 - [x] drop the reference module (2026-10-30, plan 002)
 - [x] move the database to Postgres 18 with pgvector and add grant_admin (2026-10-30, plan 003)
 - [x] admin can connect a GitHub repository to the knowledge base (2026-10-31, plan 004)
+- [x] user can search the knowledge base with hybrid search (2026-10-31, plan 005)

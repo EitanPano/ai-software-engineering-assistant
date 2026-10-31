@@ -80,9 +80,10 @@ src/app/
                       (model.py: reserved, for an engine that defines storage in code)
                       (health, auth, user; conversation: the reference to copy; run: the
                       agent's runs; agent: the loop, a controller only; source: connected
-                      repositories and their index)
+                      repositories and their index; search: hybrid search over the ready
+                      chunks, a controller only, the chunks being the source module's; see Search)
   models/<name>/      interface · type · enums · constants (auth, session, user,
-                      conversation, run, source)
+                      conversation, run, source, search)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
                       asgi (helpers the ASGI middleware share)
@@ -459,6 +460,63 @@ changes only by plan.
   fake's docstring). `tests/source_support.py` points the clients at them in process (the `fakes`
   fixture) and mints admin and user tokens without an account. `python -m tests.fake_github` and
   `python -m tests.fake_voyage` serve them for e2e. No network and no key.
+
+## Search
+
+- `GET /api/search?q=&limit=` (`api/search/`, any signed-in account, `require_auth` and no role):
+  `q` is 1 to 500 characters after trimming with no NUL, `limit` 1 to 20 (default 10). It answers
+  `SearchResult { items: SearchHit[], incomplete }`, a bounded top-k with no cursor; Voyage down or
+  limiting is a 503 `upstream_unavailable`, never a keyword-only answer. `SEARCH` in
+  `config/constants.py` holds every number (RRF `rrf_k` 60, `candidates` 50 per search,
+  `keyword_candidates` 2,000, the trigram word length 3 to 100 and threshold 0.9, `max_scan_tuples`
+  20,000, `statement_timeout_ms` 3,000, the query's 3 attempts, each phase of one bounded by 5 s); `models/search/` the limits
+  of `q` and `limit` and the records. A search holds a pooled connection, so `prepare_search` sets
+  a transaction-local `statement_timeout`: Postgres tests `<%` on every trigram candidate before
+  the filter to `ready` sources, so a common token could otherwise hold the connection for
+  seconds. A cancelled statement (SQLSTATE 57014) is a 503 `upstream_unavailable`
+  (`services/utils/postgres_error.py`). Only the search sets it; the pool-wide timeout is a
+  later decision.
+- Exported rules. `api/search/controller.py › search_knowledge_base(text=, limit=)` embeds the text
+  (`services/voyage.py › embed_query`, outside any transaction), runs a trigram search only for one
+  word of 3 to 100 characters (a two-letter word has no trigram of its own, only padded ones), and
+  returns a `SearchOutcome`; it takes no caller, so the
+  `knowledge` MCP server calls it. `api/source/controller.py › search_ready_chunks(embedding=,
+  text=, trigram_token=, limit=)` is the rule under it: one transaction with the scan settings
+  (`service.prepare_search`: `hnsw.iterative_scan = strict_order`, `hnsw.max_scan_tuples`,
+  `pg_trgm.word_similarity_threshold`), and `service.search_chunks`, one statement that ranks a
+  semantic, a full-text and a trigram search over `ready` sources only and fuses them by RRF, ties
+  on the chunk id. `incomplete` is true when a keyword search reached `keyword_candidates` or the
+  semantic search found fewer chunks than the `ready` sources could supply (pgvector filters after its
+  index scan and documents no signal when a scan stops); it is logged as `search incomplete` with
+  counts and no query text.
+- `0006-hybrid-search.sql`: `pg_trgm`, `chunk.keyword` (stored, `simple` configuration: stemming
+  breaks an identifier, and a dotted call such as `limiter.defer_penalty(key)` is read as other
+  words, so only trigram search finds it), and the GIN, trigram and HNSW indexes.
+- Tests: `tests/test_search.py` runs on the scripted Voyage. `tests/fake_voyage.py` embeds a text
+  as a dense unit vector seeded by its SHA-256; a document chunk holding an anchor of
+  `tests/fixture_repository.py` (`SEMANTIC_ANCHOR`, `KEYWORD_ANCHOR`, `DOTTED_ANCHOR`) embeds as
+  the anchor's vector, `SEMANTIC_QUERY` as its chunk's, and `KEYWORD_QUERY` and `DOTTED_QUERY` as
+  the negation of theirs, so those chunks are last in the semantic search. `src/limiter.py`
+  (`tests/limiter_source.py`) is the real-sized file those queries find. `ExpectedChunk` lines are
+  read from its text, so a parse that fell back fails the test.
+- Two scripts, in no gate. `uv run python -m tests.measure_search` is free and EMPTIES `app_test`
+  (it runs beside neither `testDb` nor a `verify`): 100,000 `ready` chunks, six timed searches
+  (an identifier, one of common words, a common word, a short word, a three-letter word, a
+  sentence) and the in-flight cases; it exits 1 over 1 s, on a short result not reported
+  `incomplete`, or, for the in-flight one-word search, past 3.5 s (a 503 from the statement limit
+  is printed and allowed there).
+  `uv run python -m tests.live_retrieval` is PAID (real Voyage, under $0.01) and run by a person
+  with `VOYAGE_API_KEY` in the shell: it ranks the fixture in memory and exits 0 when the
+  paraphrase's chunk is in the top 5.
+- Statistics: `_index` calls `service.refresh_statistics()` (`analyze source, document, chunk`) once a
+  source is `ready`, best effort and logged as a warning on failure. A small table never reaches
+  autovacuum's threshold, and without statistics the planner reads every chunk through the
+  document index (9 s at 100,000 chunks, 40 to 350 ms with them). `0007-analyze-search-tables.sql`
+  does the same once for an install that indexed before `0006` (a migration cannot wait for the
+  next index).
+- Voyage's 429: the index path waits what `Retry-After` says in whole seconds, at most 2 minutes,
+  or about a minute with none usable (an HTTP-date counts as none); a search never waits, it spends
+  its 3 attempts and answers 503.
 
 ## The engine seam
 

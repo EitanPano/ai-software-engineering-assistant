@@ -22,7 +22,7 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | approval | A human's decision on a tool call | table `approval`, route `/api/approval`, module `approval` |
 | tool policy | The rule that allows, asks about or denies a tool | table `tool_policy`, route `/api/tool-policy`, module `tool_policy` |
 | MCP server | A Model Context Protocol server the agent's tools come from | table `mcp_server`, route `/api/mcp-server`, module `mcp_server` |
-| knowledge base | Every chunk from every source, searched by the agent | MCP server `knowledge` |
+| knowledge base | Every chunk of every `ready` source, searched by a signed-in person and by the agent | route `/api/search`, MCP server `knowledge` |
 | source | A connected GitHub repository at a ref | table `source`, route `/api/source`, module `source` |
 | document | One file from a source | table `document` |
 | chunk | A searchable slice of a document, with its line range, keyword index and embedding | table `chunk` |
@@ -30,6 +30,7 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | parse worker | The child process that runs `tree-sitter` on repository files, with no secrets and a deadline | `services/parse_worker.py` |
 | fixture repository | The small repository the fakes serve, which tests and evals index | `tests/fixture_repository.py` |
 | hybrid search | Semantic and keyword search fused with reciprocal rank fusion (RRF) | module `search`, route `/api/search` |
+| search hit | One chunk a search returns, with its repository, file, line range and ranks | `SearchHit`, `entity/chunk` |
 | memory | Long-term knowledge about a user, distinct from conversation history | table `memory`, route `/api/memory`, module `memory` |
 | eval case | One question with its expected chunks and expected answer | table `eval_case` |
 | eval run | One execution of the eval cases, with its scores | table `eval_run`, route `/api/eval-run`, module `eval` |
@@ -38,6 +39,7 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | connect | Add a source and index it | `feature/connect` |
 | start | Begin a new empty conversation | `feature/start-conversation` |
 | send | Add a user message to a conversation and start a run | `feature/send-message` |
+| search | Find the chunks of `ready` sources for a text | `feature/search` |
 
 ## Actions
 

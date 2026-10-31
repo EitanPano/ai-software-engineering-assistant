@@ -146,6 +146,7 @@ class TestTheDocument:
             "/api/run/{id}/event": {"get"},
             "/api/source": {"get", "post"},
             "/api/source/{id}/indexing": {"post"},
+            "/api/search": {"get"},
         }
 
     def test_documents_the_user_list_query_and_its_page_component(self) -> None:
@@ -253,6 +254,8 @@ class TestTheShaping:
                 "Source",
                 "SourcePage",
                 "ConnectSourceBody",
+                "SearchHit",
+                "SearchResult",
             }
         )
 

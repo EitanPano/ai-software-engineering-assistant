@@ -173,6 +173,45 @@ EMBEDDING: Final = EmbeddingSettings(
     batch_tokens=100_000,
     commit_chunks=512,
 )
+
+
+@dataclass(frozen=True)
+class SearchSettings:
+    """How a search behaves. The ranks are fused by RRF, `1 / (rrf_k + rank)` per search.
+    `candidates` is how many chunks each search ranks into the fusion; `keyword_candidates` caps
+    the matches a full-text or trigram search must rank, and a search that reaches it reports the
+    result `incomplete`. A trigram search runs only for a single word of `trigram_min_chars` to
+    `trigram_max_chars` (a two-letter word has no trigram of its own, only padded ones, which on
+    real code makes half the chunks candidates), at `trigram_threshold` word similarity (an exact
+    identifier scores 1.0, a typo 0.82 and unrelated words 0.67). `max_scan_tuples` bounds the
+    HNSW scan and `statement_timeout_ms` every statement of the search transaction, which holds a
+    pooled connection (past it the answer is a 503). The query's embedding gets `embed_attempts`
+    tries, each phase of one bounded by `embed_attempt_seconds`."""
+
+    rrf_k: int
+    candidates: int
+    keyword_candidates: int
+    trigram_min_chars: int
+    trigram_max_chars: int
+    trigram_threshold: float
+    max_scan_tuples: int
+    statement_timeout_ms: int
+    embed_attempts: int
+    embed_attempt_seconds: float
+
+
+SEARCH: Final = SearchSettings(
+    rrf_k=60,
+    candidates=50,
+    keyword_candidates=2000,
+    trigram_min_chars=3,
+    trigram_max_chars=100,
+    trigram_threshold=0.9,
+    max_scan_tuples=20_000,
+    statement_timeout_ms=3000,
+    embed_attempts=3,
+    embed_attempt_seconds=5.0,
+)
 # Directories and suffixes the index skips: not source text.
 SKIPPED_DIRECTORIES: Final = frozenset(
     {".git", "node_modules", "vendor", "dist", "build", "target", "__pycache__", ".venv", "venv"}

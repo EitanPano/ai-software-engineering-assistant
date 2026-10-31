@@ -6,5 +6,6 @@ import type { NavEntry } from '@/shared/ui/pattern/nav-links'
 export const NAV: NavEntry[] = [
   { to: '/', label: 'Home' },
   { to: '/conversation', label: 'Conversations' },
+  { to: '/search', label: 'Search' },
   { to: '/source', label: 'Sources', role: 'admin' },
 ]

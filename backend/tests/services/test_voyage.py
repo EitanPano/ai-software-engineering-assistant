@@ -6,10 +6,10 @@ from collections.abc import AsyncIterator, Callable
 import httpx2
 import pytest
 
-from app.config.constants import EMBEDDING
+from app.config.constants import EMBEDDING, SEARCH
 from app.config.env import env
 from app.services import voyage
-from app.services.voyage import ATTEMPTS, EmbeddingUnavailable, embed_documents
+from app.services.voyage import ATTEMPTS, EmbeddingUnavailable, embed_documents, embed_query
 from tests import fake_voyage
 
 
@@ -101,8 +101,8 @@ class TestRetries:
         client = use_handler(handler)
 
         assert len(await embed_documents(["alpha"])) == 1
-        assert len(fake) == 2
-        assert fake == sorted(fake)
+        # The throttle waits the default minute (no Retry-After), the 500 only the short backoff.
+        assert fake == [60.0, 1.0]
         await client.aclose()
 
     @pytest.mark.usefixtures("fake")
@@ -151,6 +151,156 @@ class TestRetries:
         fake_voyage.state.released.add("later")
 
         assert len(await embed_documents(["x [[fail:later]] x"])) == 1
+
+
+def throttled(headers: dict[str, str], calls: list[httpx2.Request]) -> httpx2.AsyncClient:
+    """A Voyage that answers 429 with these headers until it has been asked ten times."""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(request)
+        if len(calls) < 10:
+            return httpx2.Response(429, headers=headers, json={"detail": "slow down"})
+        return httpx2.Response(
+            200, json={"data": [{"index": 0, "embedding": [0.0] * EMBEDDING.dimension}]}
+        )
+
+    return use_handler(handler)
+
+
+class TestEmbedQuery:
+    @pytest.mark.usefixtures("fake")
+    async def test_embeds_one_text_as_a_query(self) -> None:
+        vector = await embed_query("alpha")
+
+        assert vector == fake_voyage.vector_of("alpha")
+        (body,) = fake_voyage.state.requests
+        assert body["input"] == ["alpha"]
+        assert body["input_type"] == "query"
+        assert body["model"] == "voyage-code-4"
+        assert body["truncation"] is False
+        assert body["output_dimension"] == 1024
+        assert fake_voyage.state.authorizations == [f"Bearer {env.voyage_api_key}"]
+
+    async def test_stops_at_its_attempts_of_a_short_timeout(self, fake: list[float]) -> None:
+        requests: list[httpx2.Request] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            requests.append(request)
+            return httpx2.Response(503, json={"detail": "later"})
+
+        client = use_handler(handler)
+
+        with pytest.raises(EmbeddingUnavailable):
+            await embed_query("alpha")
+        assert len(requests) == SEARCH.embed_attempts == 3
+        whole = {"connect": 5.0, "read": 5.0, "write": 5.0, "pool": 5.0}
+        assert [r.extensions["timeout"] for r in requests] == [whole] * 3
+        assert len(fake) == SEARCH.embed_attempts - 1
+        await client.aclose()
+
+    async def test_the_index_keeps_its_longer_timeout(self, fake: list[float]) -> None:
+        del fake
+        requests: list[httpx2.Request] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            requests.append(request)
+            return httpx2.Response(
+                200, json={"data": [{"index": 0, "embedding": [0.0] * EMBEDDING.dimension}]}
+            )
+
+        client = use_handler(handler)
+
+        await embed_documents(["alpha"])
+        # The whole timeout: a number would replace the client's and make a connect wait 60 s.
+        assert requests[0].extensions["timeout"] == {
+            "connect": 10.0,
+            "read": 60.0,
+            "write": 60.0,
+            "pool": 60.0,
+        }
+        await client.aclose()
+
+    @pytest.mark.usefixtures("fake")
+    async def test_a_vector_of_the_wrong_length_is_unavailable(self) -> None:
+        with pytest.raises(EmbeddingUnavailable):
+            await embed_query("[[bad]]")
+
+    async def test_a_rejected_query_is_not_retried(self, fake: list[float]) -> None:
+        calls: list[int] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            calls.append(1)
+            return httpx2.Response(400, json={"detail": "bad input"})
+
+        client = use_handler(handler)
+
+        with pytest.raises(EmbeddingUnavailable):
+            await embed_query("alpha")
+        assert calls == [1]
+        assert fake == []
+        await client.aclose()
+
+    @pytest.mark.usefixtures("fake")
+    async def test_the_error_carries_neither_the_key_nor_the_text(self) -> None:
+        with pytest.raises(EmbeddingUnavailable) as raised:
+            await embed_query("secret words [[fail:never]]")
+
+        assert env.voyage_api_key not in str(raised.value)
+        assert "secret words" not in str(raised.value)
+
+
+class TestRateLimited:
+    """A 429 on the index waits what `Retry-After` says (no real sleep: `pause` records), and one
+    on a search spends its attempts and gives up."""
+
+    @pytest.mark.parametrize(
+        ("headers", "waited"),
+        [
+            ({"retry-after": "7"}, 7.0),
+            ({"retry-after": " 45 "}, 45.0),
+            ({"retry-after": "9999"}, 120.0),  # capped at two minutes
+            ({"retry-after": "0"}, 0.5),  # never less than the short backoff
+            ({}, 60.0),  # no header: about a minute
+            ({"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"}, 60.0),  # an HTTP-date is unusable
+            ({"retry-after": "soon"}, 60.0),
+            ({"retry-after": "-5"}, 60.0),
+            ({"retry-after": "1.5"}, 60.0),
+        ],
+    )
+    async def test_the_index_waits_out_a_429_by_retry_after(
+        self, fake: list[float], headers: dict[str, str], waited: float
+    ) -> None:
+        calls: list[httpx2.Request] = []
+        client = throttled(headers, calls)
+
+        with pytest.raises(EmbeddingUnavailable):
+            await embed_documents(["alpha"])
+
+        assert len(calls) == ATTEMPTS
+        assert fake[0] == waited
+        assert len(fake) == ATTEMPTS - 1
+        await client.aclose()
+
+    async def test_the_index_succeeds_after_the_wait(self, fake: list[float]) -> None:
+        calls: list[httpx2.Request] = []
+        client = throttled({"retry-after": "3"}, calls)
+        calls.extend([httpx2.Request("POST", "http://x")] * 7)  # the 8th and 9th ask are throttled
+
+        assert len(await embed_documents(["alpha"])) == 1
+        assert fake == [3.0, 3.0]
+        await client.aclose()
+
+    async def test_a_429_on_a_query_does_not_wait_it_out(self, fake: list[float]) -> None:
+        calls: list[httpx2.Request] = []
+        client = throttled({"retry-after": "100"}, calls)
+
+        with pytest.raises(EmbeddingUnavailable):
+            await embed_query("alpha")
+
+        assert len(calls) == SEARCH.embed_attempts
+        assert max(fake) < 100
+        assert sum(fake) < 10
+        await client.aclose()
 
 
 @pytest.mark.usefixtures("fake")

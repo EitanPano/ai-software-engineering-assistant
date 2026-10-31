@@ -50,8 +50,9 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
    call: allow, ask or deny. A tool with no policy is denied.
 10. Approval: an `ask` call stops the run at `awaiting_approval`, with no process waiting. The
     decision resumes the run from Postgres, so an approval may take hours and survive a restart.
-11. Retrieval: hybrid search fuses `pgvector` and keyword results with reciprocal rank fusion
-    (RRF). The agent reaches it only through the `knowledge` MCP server and decides when to
+11. Retrieval: hybrid search fuses `pgvector`, full-text and trigram results with reciprocal rank
+    fusion (RRF), over the chunks of `ready` sources only. A signed-in person searches at
+    `/search`; the agent reaches it only through the `knowledge` MCP server and decides when to
     search again.
 12. Memory: `message` rows are one conversation's history. `memory` rows are per-user long-term
     knowledge, extracted after a conversation and retrieved by the agent; the user can list and
@@ -94,8 +95,8 @@ Planned; each task's migration creates its tables and the code wins on conflict.
 - `mcp_server`: name, URL, enabled.
 - `source`: repository URL, ref, status, error code, indexed commit, counts.
 - `document`: `source`; path, language.
-- `chunk`: `document`; symbol, line range, content, embedding. The search task adds its keyword
-  index.
+- `chunk`: `document`; symbol, line range, content, embedding, and the stored `keyword` that
+  full-text search reads.
 - `memory`: owner `user`; content, embedding, originating `conversation`.
 - `eval_case`: question, expected chunks, expected answer.
 - `eval_run`: scores per metric and per case.
@@ -198,6 +199,13 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-31: search. Route `GET /api/search`, any signed-in account, and the screen `/search`.
+  `0006-hybrid-search.sql` adds `pg_trgm`, the stored `chunk.keyword` and the GIN and HNSW indexes,
+  and `0007-analyze-search-tables.sql` analyzes the three tables once. An index refreshes their
+  statistics when a source turns `ready`, because a table as small as `source` may never reach
+  autovacuum's threshold, and the planner then reads every chunk. A search has a 3 s statement
+  limit and answers 503 past it, so it holds a pooled connection for 3 s at most. Search text now
+  goes to Voyage AI.
 - 2026-10-31: sources. Routes `POST` and `GET /api/source` and `POST /api/source/{id}/indexing`,
   admin only, and the screens `/source` and `/source/connect`. Tables `source`, `document` and
   `chunk` (`0005-source.sql`). An index is a bus reaction that reads a public repository's tarball

@@ -26,7 +26,7 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 
 - Multiple MCP servers: our own `knowledge` server and GitHub's official server (planned)
 - Knowledge sources: an admin connects a public GitHub repository, indexed by symbol and embedded
-- Hybrid RAG: semantic and keyword search over connected GitHub repositories (planned)
+- Hybrid RAG: semantic and keyword search over connected GitHub repositories
 - Agentic RAG: the agent decides when to retrieve more information (planned)
 - Persistent agent memory: conversation history distinct from long-term knowledge (planned)
 - Tool execution permissions: human approval for sensitive actions (planned)

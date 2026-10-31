@@ -12,6 +12,7 @@ from app.api.auth.routes import router as auth_router
 from app.api.conversation.routes import router as conversation_router
 from app.api.health.routes import router as health_router
 from app.api.run.routes import router as run_router
+from app.api.search.routes import router as search_router
 from app.api.source.routes import router as source_router
 from app.api.user.routes import router as user_router
 
@@ -23,3 +24,4 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(conversation_router, prefix="/api/conversation")
     app.include_router(run_router, prefix="/api/run")
     app.include_router(source_router, prefix="/api/source")
+    app.include_router(search_router, prefix="/api/search")

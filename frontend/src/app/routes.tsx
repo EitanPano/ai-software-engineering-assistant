@@ -21,6 +21,7 @@ import SiteLoading from './(site)/loading'
 import SiteNotFound from './(site)/not-found'
 import HomePage from './(site)/page'
 import ProfilePage from './(site)/profile/page'
+import SearchPage from './(site)/search/page'
 import ConnectSourcePage from './(site)/source/connect/page'
 import SourceListPage from './(site)/source/page'
 import RootError from './root-error'
@@ -56,6 +57,12 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   path: 'profile',
                   loader: ({ request }) => requireAccount(queryClient, returnToOf(request)),
                   Component: ProfilePage,
+                },
+                {
+                  // No prefetch: the page's Suspense, keyed by the text, shows the skeleton.
+                  path: 'search',
+                  loader: ({ request }) => requireAccount(queryClient, returnToOf(request)),
+                  Component: SearchPage,
                 },
                 {
                   path: 'conversation',

@@ -16,11 +16,18 @@ export function CardSkeleton() {
   )
 }
 
-export function ListSkeleton({ rows = 3 }: { rows?: number }) {
+// `rowClassName` sets the row height when a row is taller than the default `h-12`.
+export function ListSkeleton({
+  rows = 3,
+  rowClassName = 'h-12',
+}: {
+  rows?: number
+  rowClassName?: string
+}) {
   return (
     <div className="flex flex-col gap-3">
       {Array.from({ length: rows }, (_, index) => (
-        <Skeleton key={index} className="h-12 w-full" />
+        <Skeleton key={index} className={`${rowClassName} w-full`} />
       ))}
     </div>
   )

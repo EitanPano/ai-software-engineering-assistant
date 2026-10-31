@@ -7,7 +7,11 @@ A request is at most `EMBEDDING.batch_texts` texts and about `EMBEDDING.batch_to
 (Voyage publishes no per-request token limit for this model, so it stays under the 120,000 of the
 previous one); the token count is estimated from the characters, erring high. A 429, a 5xx or a
 transport failure is retried `ATTEMPTS` times in all with exponential backoff; any other answer
-(a 400 for a text that is too long) is not, since the same request would fail the same way. After
+(a 400 for a text that is too long) is not, since the same request would fail the same way. A 429
+on the index path waits what `Retry-After` says (whole seconds, at most two minutes; about a minute
+with none usable), because the short backoff cannot outlast a per-minute limit and a failed index
+embeds everything again. `embed_query` runs on a request path: 3 attempts, each phase of one
+bounded by 5 s, the short backoff only, never a throttle's wait (the caller answers 503). After
 that, and for an answer that is not what was asked for, `EmbeddingUnavailable` is raised with a
 fixed message: no text, key or provider payload leaves this module.
 
@@ -16,12 +20,14 @@ It does not belong: deciding what to embed (the source controller) or storage.
 
 import asyncio
 import math
+import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Final
 
 import httpx2
 
-from app.config.constants import EMBEDDING
+from app.config.constants import EMBEDDING, SEARCH
 from app.config.env import env
 from app.services.logger import log
 
@@ -42,10 +48,8 @@ _state: dict[str, httpx2.AsyncClient] = {}
 def _client() -> httpx2.AsyncClient:
     client = _state.get("client")
     if client is None:
-        client = httpx2.AsyncClient(
-            base_url=env.voyage_base_url or DEFAULT_BASE_URL,
-            timeout=httpx2.Timeout(60.0, connect=10.0),
-        )
+        # No timeout here: every request carries its budget's whole `httpx2.Timeout`.
+        client = httpx2.AsyncClient(base_url=env.voyage_base_url or DEFAULT_BASE_URL)
         _state["client"] = client
     return client
 
@@ -93,19 +97,64 @@ async def embed_documents(texts: Sequence[str]) -> list[list[float]]:
     return vectors
 
 
-async def _embed(batch: list[str]) -> list[list[float]]:
+async def embed_query(text: str) -> list[float]:
+    """The vector of one search text, embedded with the model's query prompt. It runs on a request
+    path, so it keeps a short budget (`SEARCH.embed_attempts` tries, each phase of a try bounded by
+    `SEARCH.embed_attempt_seconds`) and never waits out a throttle: a 429 spends an attempt like
+    any failure, and the caller answers 503."""
+    budget = _Budget(
+        attempts=SEARCH.embed_attempts,
+        timeout=httpx2.Timeout(SEARCH.embed_attempt_seconds),
+        waits_out_throttle=False,
+    )
+    return (await _embed([text], "query", budget))[0]
+
+
+@dataclass(frozen=True)
+class _Budget:
+    attempts: int
+    timeout: httpx2.Timeout
+    # Only the index waits for a per-minute limit to lift; a request would hold its caller.
+    waits_out_throttle: bool
+
+
+_INDEX_BUDGET: Final = _Budget(
+    attempts=ATTEMPTS, timeout=httpx2.Timeout(60.0, connect=10.0), waits_out_throttle=True
+)
+# What a 429 without a usable `Retry-After` waits, and the most it ever waits: the limits are per
+# minute, and a failed index re-embeds everything.
+_THROTTLE_DEFAULT_SECONDS: Final = 60.0
+_THROTTLE_MAX_SECONDS: Final = 120.0
+_SECONDS: Final = re.compile(r"[0-9]{1,6}")
+
+
+def _throttle_wait(response: httpx2.Response) -> float:
+    """What `Retry-After` says in seconds, at most two minutes; an HTTP-date or anything else
+    counts as no usable header."""
+    value = response.headers.get("retry-after", "").strip()
+    if _SECONDS.fullmatch(value) is None:
+        return _THROTTLE_DEFAULT_SECONDS
+    return min(float(value), _THROTTLE_MAX_SECONDS)
+
+
+async def _embed(
+    batch: list[str], input_type: str = "document", budget: _Budget = _INDEX_BUDGET
+) -> list[list[float]]:
     body = {
         "input": batch,
         "model": EMBEDDING.model,
-        "input_type": "document",
+        "input_type": input_type,
         "truncation": False,
         "output_dimension": EMBEDDING.dimension,
         "output_dtype": "float",
     }
     headers = {"Authorization": f"Bearer {env.voyage_api_key}"}
-    for attempt in range(1, ATTEMPTS + 1):
+    for attempt in range(1, budget.attempts + 1):
+        delay = min(_BASE_DELAY_SECONDS * 2 ** (attempt - 1), _MAX_DELAY_SECONDS)
         try:
-            response = await _client().post("/v1/embeddings", json=body, headers=headers)
+            response = await _client().post(
+                "/v1/embeddings", json=body, headers=headers, timeout=budget.timeout
+            )
         except httpx2.HTTPError as error:
             log.warning("voyage unreachable", {"attempt": attempt, "reason": type(error).__name__})
         else:
@@ -114,8 +163,10 @@ async def _embed(batch: list[str]) -> list[list[float]]:
             log.warning("voyage refused", {"attempt": attempt, "status": response.status_code})
             if response.status_code not in _RETRYABLE:
                 raise EmbeddingUnavailable("voyage rejected the request")
-        if attempt < ATTEMPTS:
-            await pause(min(_BASE_DELAY_SECONDS * 2 ** (attempt - 1), _MAX_DELAY_SECONDS))
+            if response.status_code == 429 and budget.waits_out_throttle:
+                delay = max(delay, _throttle_wait(response))
+        if attempt < budget.attempts:
+            await pause(delay)
     raise EmbeddingUnavailable("voyage is unavailable")
 
 

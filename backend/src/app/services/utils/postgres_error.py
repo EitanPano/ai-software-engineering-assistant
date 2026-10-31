@@ -16,8 +16,9 @@ import psycopg
 from app.services.utils.error import AppError
 
 # The states of a server that is shutting down (57P01, 57P02), starting up (57P03) or out of
-# connections (53300). A whole class 08 (connection exception) is unavailable too.
-_UNAVAILABLE_STATES: Final = frozenset({"57P01", "57P02", "57P03", "53300"})
+# connections (53300), and a statement it cancelled (57014: a `statement_timeout`, which the search
+# sets). A whole class 08 (connection exception) is unavailable too.
+_UNAVAILABLE_STATES: Final = frozenset({"57P01", "57P02", "57P03", "53300", "57014"})
 _CONNECTION_CLASS: Final = "08"
 _UNIQUE_VIOLATION: Final = "23505"
 

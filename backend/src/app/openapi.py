@@ -64,6 +64,8 @@ COMPONENTS: Final = frozenset(
         "Source",
         "SourcePage",
         "ConnectSourceBody",
+        "SearchHit",
+        "SearchResult",
     }
 )
 

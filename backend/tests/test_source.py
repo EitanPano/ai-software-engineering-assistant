@@ -1,7 +1,7 @@
 import asyncio
 import threading
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import timedelta
 
 import httpx
@@ -11,10 +11,11 @@ from pydantic import ValidationError
 from app.api.source import service
 from app.api.source.controller import fail_lost_sources, index_source
 from app.api.source.schema import ConnectSourceBody
-from app.config.constants import EMBEDDING, INDEX_CAPS, ParseLimits
+from app.config.constants import CHUNK_BOUNDS, EMBEDDING, INDEX_CAPS, ParseLimits
 from app.infra.pubsub import pubsub
 from app.models.source.enums import SourceErrorCode, SourceStatus
 from app.models.source.interface import DocumentRecord, SourceRecord
+from app.services.db import fetch_all
 from app.services.event import SOURCE_QUEUED, SourceQueued, drain, subscribe
 from app.services.parse import ParseSession
 from app.services.utils import clock
@@ -394,6 +395,12 @@ class TestList:
             assert error_code(res) == "validation_failed"
 
 
+@dataclass(frozen=True)
+class _Tuples:
+    relname: str
+    tuples: float
+
+
 def lines_of(path: str) -> list[str]:
     return FIXTURE_FILES[path].decode().split("\n")
 
@@ -430,9 +437,27 @@ class TestIndex:
             lines = lines_of(path)
             mine = [chunk for chunk in chunks if chunk.path == path]
             covered: set[int] = set()
+            pieces: dict[int, list[str]] = {}
             for chunk in mine:
-                assert chunk.content == "\n".join(lines[chunk.start_line - 1 : chunk.end_line])
+                if chunk.start_line == chunk.end_line and (
+                    len(lines[chunk.start_line - 1]) > CHUNK_BOUNDS.max_chars
+                ):
+                    # The documented exception: a line over the bound is cut into pieces that
+                    # share its number, and together they are the line.
+                    assert len(chunk.content) <= CHUNK_BOUNDS.max_chars
+                    pieces.setdefault(chunk.start_line, []).append(chunk.content)
+                else:
+                    assert chunk.content == "\n".join(lines[chunk.start_line - 1 : chunk.end_line])
                 covered.update(range(chunk.start_line, chunk.end_line + 1))
+            assert pieces or path != "src/limiter.py"
+            for number, found in pieces.items():
+                # The rows come back in no order within a line number.
+                line = lines[number - 1]
+                cut = [
+                    line[offset : offset + CHUNK_BOUNDS.max_chars]
+                    for offset in range(0, len(line), CHUNK_BOUNDS.max_chars)
+                ]
+                assert sorted(found) == sorted(cut)
             assert [
                 n for n, line in enumerate(lines, 1) if line.strip() and n not in covered
             ] == [], path
@@ -692,6 +717,62 @@ class TestIndex:
         assert "error=GithubUnavailable" in line
         assert "status=502" in line
         assert "reason=repository_unavailable" in line
+
+    async def test_a_ready_source_leaves_the_planner_statistics_of_its_tables(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        """A small table never reaches autovacuum's threshold, and the planner then reads every
+        chunk through the document index (V06)."""
+        source_id = await connected(client)
+        await index_source(source_id)
+
+        tuples = await fetch_all(
+            _Tuples,
+            "select relname, reltuples::float8 as tuples from pg_class "
+            "where relname in ('source', 'document', 'chunk')",
+        )
+        assert {row.relname for row in tuples} == {"source", "document", "chunk"}
+        assert all(row.tuples >= 0 for row in tuples), tuples
+
+    async def test_a_failing_refresh_leaves_the_source_ready_and_logs_a_warning(
+        self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        logger, sink = recording_logger()
+        monkeypatch.setattr("app.api.source.controller.log", logger)
+
+        async def refuse() -> None:
+            raise RuntimeError("secret internal detail")
+
+        monkeypatch.setattr("app.api.source.service.refresh_statistics", refuse)
+        source_id = await connected(client)
+
+        await index_source(source_id)
+
+        assert (await wire_of(client, source_id))["status"] == "ready"
+        (line,) = [line for line in sink.lines if "could not refresh statistics" in line]
+        assert line.startswith("warning ")
+        assert f"sourceId={source_id}" in line
+        assert "secret internal detail" not in line
+        assert not any("index failed" in line for line in sink.lines)
+
+    async def test_no_refresh_runs_when_the_source_left_indexing_first(
+        self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[int] = []
+
+        async def spy() -> None:
+            calls.append(1)
+
+        async def not_indexing(*args: object) -> bool:
+            return False
+
+        monkeypatch.setattr("app.api.source.service.refresh_statistics", spy)
+        monkeypatch.setattr("app.api.source.service.finish_ready", not_indexing)
+        source_id = await connected(client)
+
+        await index_source(source_id)
+
+        assert calls == []
 
     async def test_an_unexpected_error_ends_failed_as_internal_and_hides_it(
         self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch

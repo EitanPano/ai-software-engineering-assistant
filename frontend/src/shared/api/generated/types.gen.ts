@@ -417,6 +417,78 @@ export type RunEvent =
     }
 
 /**
+ * SearchHit
+ */
+export type SearchHit = {
+  /**
+   * Chunkid
+   */
+  chunkId: string
+  /**
+   * Sourceid
+   */
+  sourceId: string
+  /**
+   * Url
+   */
+  url: string
+  /**
+   * Ref
+   */
+  ref: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Symbol
+   */
+  symbol: string | null
+  /**
+   * Startline
+   */
+  startLine: number
+  /**
+   * Endline
+   */
+  endLine: number
+  /**
+   * Content
+   */
+  content: string
+  /**
+   * Score
+   */
+  score: number
+  /**
+   * Semanticrank
+   */
+  semanticRank: number | null
+  /**
+   * Fulltextrank
+   */
+  fullTextRank: number | null
+  /**
+   * Trigramrank
+   */
+  trigramRank: number | null
+}
+
+/**
+ * SearchResult
+ */
+export type SearchResult = {
+  /**
+   * Items
+   */
+  items: Array<SearchHit>
+  /**
+   * Incomplete
+   */
+  incomplete: boolean
+}
+
+/**
  * SendMessageBody
  */
 export type SendMessageBody = {
@@ -1373,3 +1445,46 @@ export type PostApiSourceByIdIndexingResponses = {
 
 export type PostApiSourceByIdIndexingResponse =
   PostApiSourceByIdIndexingResponses[keyof PostApiSourceByIdIndexingResponses]
+
+export type GetApiSearchData = {
+  body?: never
+  path?: never
+  query: {
+    q: string
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: '/api/search'
+}
+
+export type GetApiSearchErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+  /**
+   * Upstream unavailable
+   */
+  503: ErrorBody
+}
+
+export type GetApiSearchError = GetApiSearchErrors[keyof GetApiSearchErrors]
+
+export type GetApiSearchResponses = {
+  /**
+   * The best chunks of every ready source, best first
+   */
+  200: SearchResult
+}
+
+export type GetApiSearchResponse = GetApiSearchResponses[keyof GetApiSearchResponses]

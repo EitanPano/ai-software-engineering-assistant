@@ -20,6 +20,7 @@ the parse worker child is ended on every path. Nothing is searchable until the s
 import asyncio
 import itertools
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import IO, Annotated, assert_never
@@ -36,9 +37,10 @@ from app.api.source.schema import (
     SourcePage,
     SourceStatusName,
 )
-from app.config.constants import EMBEDDING, INDEX_CAPS
+from app.config.constants import EMBEDDING, INDEX_CAPS, SEARCH
 from app.middleware.auth import require_caller
 from app.models.auth.type import Caller
+from app.models.search.interface import SearchCounts, SearchHitRecord, SearchOutcome
 from app.models.source.enums import SourceErrorCode, SourceStatus
 from app.models.source.interface import ChunkRecord, DocumentRecord, SourceRecord
 from app.models.source.type import Chunk
@@ -285,6 +287,20 @@ async def _index(source: SourceRecord, session: ParseSession) -> None:
     documents, chunks = await _store(drafts)
     if not await service.finish_ready(source.id, commit, documents, chunks, clock.now()):
         log.warning("source left indexing before it finished", {"sourceId": source.id})
+        return
+    await _refresh_statistics(source.id)
+
+
+async def _refresh_statistics(source_id: str) -> None:
+    """Best effort: the source is already `ready`, so a failure here must not end it `failed`. A
+    cancellation is not caught."""
+    try:
+        await service.refresh_statistics()
+    except Exception as error:
+        log.warning(
+            "could not refresh statistics",
+            {"sourceId": source_id, "error": type(error).__name__},
+        )
 
 
 async def _end_failed(source_id: str, code: SourceErrorCode) -> bool:
@@ -361,6 +377,42 @@ def _log_fallbacks(source_id: str, session: ParseSession) -> None:
                 "syntaxErrors": summary.syntax_errors,
             },
         )
+
+
+async def search_ready_chunks(
+    *, embedding: Sequence[float], text: str, trigram_token: str | None, limit: int
+) -> SearchOutcome:
+    """Rule for the search module: the best `limit` chunks of the `ready` sources, fused from a
+    semantic, a full-text and a trigram search, and whether a limit cut any of them short.
+
+    `incomplete` is true when the keyword searches reached their cap of matches, or when the
+    semantic search found fewer chunks than the `ready` sources could supply: pgvector filters
+    after its index scan and documents no signal when a scan stops at `max_scan_tuples`, so the
+    shortfall is the signal. The log line carries counts and no query text."""
+
+    async def work(db: service.Tx) -> tuple[list[SearchHitRecord], SearchCounts, int]:
+        await service.prepare_search(db=db)
+        ready = await service.count_ready_chunks(db=db)
+        hits, counts = await service.search_chunks(
+            embedding=embedding, text=text, trigram_token=trigram_token, limit=limit, db=db
+        )
+        return hits, counts, ready
+
+    hits, counts, ready = await service.with_transaction(work)
+    capped = max(counts.full_text, counts.trigram) >= SEARCH.keyword_candidates
+    short = counts.semantic < min(SEARCH.candidates, ready)
+    incomplete = capped or short
+    if incomplete:
+        log.warning(
+            "search incomplete",
+            {
+                "semantic": counts.semantic,
+                "fullText": counts.full_text,
+                "trigram": counts.trigram,
+                "readyChunks": ready,
+            },
+        )
+    return SearchOutcome(hits=hits, incomplete=incomplete)
 
 
 async def fail_lost_sources(started_before: datetime) -> int:

@@ -286,6 +286,33 @@ export const zRunEvent = z.union([
 ])
 
 /**
+ * SearchHit
+ */
+export const zSearchHit = z.object({
+  chunkId: z.string(),
+  sourceId: z.string(),
+  url: z.string(),
+  ref: z.string(),
+  path: z.string(),
+  symbol: z.string().nullable(),
+  startLine: z.int(),
+  endLine: z.int(),
+  content: z.string(),
+  score: z.number(),
+  semanticRank: z.int().nullable(),
+  fullTextRank: z.int().nullable(),
+  trigramRank: z.int().nullable(),
+})
+
+/**
+ * SearchResult
+ */
+export const zSearchResult = z.object({
+  items: z.array(zSearchHit),
+  incomplete: z.boolean(),
+})
+
+/**
  * SendMessageBody
  */
 export const zSendMessageBody = z.object({
@@ -520,3 +547,13 @@ export const zPostApiSourceByIdIndexingPath = z.object({
  * The failed source, queued again
  */
 export const zPostApiSourceByIdIndexingResponse = zSource
+
+export const zGetApiSearchQuery = z.object({
+  q: z.string().min(1).max(500),
+  limit: z.int().gte(1).lte(20).optional().default(10),
+})
+
+/**
+ * The best chunks of every ready source, best first
+ */
+export const zGetApiSearchResponse = zSearchResult

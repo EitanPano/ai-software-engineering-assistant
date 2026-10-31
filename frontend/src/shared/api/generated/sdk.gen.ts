@@ -29,6 +29,9 @@ import type {
   GetApiRunByIdEventErrors,
   GetApiRunByIdEventResponse,
   GetApiRunByIdEventResponses,
+  GetApiSearchData,
+  GetApiSearchErrors,
+  GetApiSearchResponses,
   GetApiSourceData,
   GetApiSourceErrors,
   GetApiSourceResponses,
@@ -405,3 +408,14 @@ export const postApiSourceByIdIndexing = <ThrowOnError extends boolean = false>(
     PostApiSourceByIdIndexingErrors,
     ThrowOnError
   >({ url: '/api/source/{id}/indexing', ...options })
+
+/**
+ * Search the knowledge base
+ */
+export const getApiSearch = <ThrowOnError extends boolean = false>(
+  options: Options<GetApiSearchData, ThrowOnError>,
+): RequestResult<GetApiSearchResponses, GetApiSearchErrors, ThrowOnError> =>
+  (options.client ?? client).get<GetApiSearchResponses, GetApiSearchErrors, ThrowOnError>({
+    url: '/api/search',
+    ...options,
+  })

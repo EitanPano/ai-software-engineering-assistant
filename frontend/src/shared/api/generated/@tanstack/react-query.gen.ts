@@ -9,6 +9,7 @@ import {
   getApiConversationByIdMessage,
   getApiHealth,
   getApiHealthReady,
+  getApiSearch,
   getApiSource,
   getApiUser,
   getApiUserById,
@@ -42,6 +43,9 @@ import type {
   GetApiHealthReadyError,
   GetApiHealthReadyResponse,
   GetApiHealthResponse,
+  GetApiSearchData,
+  GetApiSearchError,
+  GetApiSearchResponse,
   GetApiSourceData,
   GetApiSourceError,
   GetApiSourceResponse,
@@ -640,3 +644,28 @@ export const postApiSourceByIdIndexingMutation = (
   }
   return mutationOptions
 }
+
+export const getApiSearchQueryKey = (options: Options<GetApiSearchData>) =>
+  createQueryKey('getApiSearch', options)
+
+/**
+ * Search the knowledge base
+ */
+export const getApiSearchOptions = (options: Options<GetApiSearchData>) =>
+  queryOptions<
+    GetApiSearchResponse,
+    GetApiSearchError,
+    GetApiSearchResponse,
+    ReturnType<typeof getApiSearchQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiSearch({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiSearchQueryKey(options),
+  })

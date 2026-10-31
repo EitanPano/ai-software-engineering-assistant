@@ -9,7 +9,10 @@ cap).
 import io
 import tarfile
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Final
+
+from tests.limiter_source import LIMITER_SOURCE
 
 FIXTURE_COMMIT: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 FIXTURE_ROOT: Final = "octocat-Hello-World-7fd1a60"
@@ -97,7 +100,10 @@ LATE_SOURCE: Final = "".join(f"# filler line {n}\n" for n in range(1, 298)) + (
     "\ndef last_one():\n    return 300\n"
 )
 
+LIMITER_PATH: Final = "src/limiter.py"
+
 FIXTURE_FILES: Final[Mapping[str, bytes]] = {
+    LIMITER_PATH: LIMITER_SOURCE.encode(),
     "src/late.py": LATE_SOURCE.encode(),
     "README.md": b"# Hello World\n\nA fixture repository for the source tests.\n",
     "src/app.py": PYTHON_SOURCE.encode(),
@@ -122,9 +128,66 @@ INDEXED_PATHS: Final = frozenset(
         "src/types.ts",
         "src/widget.tsx",
         "src/late.py",
+        "src/limiter.py",
         "docs/guide.txt",
     }
 )
+
+# The four search queries of the acceptance criterion and the chunk each expects, all in
+# `src/limiter.py`. The lines are found in the text, by its own markers, so a parse that silently
+# fell back to line windows (no symbol, other lines) fails the test that compares them.
+KEYWORD_QUERY: Final = "sliding_window_remaining"
+DOTTED_QUERY: Final = "defer_penalty"
+LONG_LINE_QUERY: Final = "QUOKKA_SNAPSHOT"
+# Shares no word with the chunk it expects.
+SEMANTIC_QUERY: Final = "throttle abusive clients exceeding quotas"
+
+# What a document chunk holding the marker embeds as in the fake Voyage, and the query that is
+# scripted to find it (or, negated, to put it last in the semantic search).
+KEYWORD_ANCHOR: Final = "def sliding_window_remaining"
+DOTTED_ANCHOR: Final = "limiter.defer_penalty(key)"
+SEMANTIC_ANCHOR: Final = "class WindowCounter:"
+
+
+@dataclass(frozen=True)
+class ExpectedChunk:
+    path: str
+    symbol: str | None
+    start_line: int
+    end_line: int
+
+
+def _definition(name: str, keyword: str) -> ExpectedChunk:
+    """Lines of the top-level `keyword name` in the limiter, read from its text: from the line
+    that opens it to the last non-blank line before the next top-level statement."""
+    lines = LIMITER_SOURCE.split("\n")
+    opening = f"{keyword} {name}"
+    start = next(
+        n for n, line in enumerate(lines) if line.startswith((opening + "(", opening + ":"))
+    )
+    end = start
+    for n in range(start + 1, len(lines)):
+        if lines[n] and not lines[n][0].isspace() and lines[n][0] != ")":
+            break
+        if lines[n].strip():
+            end = n
+    return ExpectedChunk(LIMITER_PATH, name, start + 1, end + 1)
+
+
+EXPECTED_KEYWORD: Final = _definition("sliding_window_remaining", "def")
+EXPECTED_DOTTED: Final = _definition("admit_batch", "def")
+EXPECTED_SEMANTIC: Final = _definition("WindowCounter", "class")
+# A symbol over the 6,000-character bound: windows that keep its name.
+OVERSIZED_SYMBOL: Final = "build_default_policy_table"
+
+
+def _long_line() -> int:
+    lines = LIMITER_SOURCE.split("\n")
+    return next(n for n, line in enumerate(lines) if line.startswith(LONG_LINE_QUERY)) + 1
+
+
+# One line over the bound is cut into pieces that share its number; the first holds the name.
+EXPECTED_LONG_LINE: Final = ExpectedChunk(LIMITER_PATH, None, _long_line(), _long_line())
 
 
 def build_tarball(
