@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, type Locator, test } from '@playwright/test'
 
 import { settled } from './support'
 
@@ -12,26 +12,34 @@ const PAGE = `
   <div id="host"><button disabled>Send</button></div>
 `
 
+// Starts the fade and holds it mid-way: at a rate of 0 it stays running until the test cancels it,
+// so `settled` meets it however loaded the machine is. Wall-clock timers could not promise that:
+// one landing after `settled` saw nothing running restarted a fade it would never wait for.
+async function holdFade(host: Locator) {
+  await host.locator('button').evaluate((button: HTMLButtonElement) => {
+    button.getBoundingClientRect() // the computed style a transition starts from
+    button.disabled = false // fades up
+    const [fade] = button.getAnimations()
+    if (!fade) throw new Error('no fade')
+    fade.currentTime = 200
+    fade.playbackRate = 0
+  })
+}
+
 test.describe('settled', () => {
   test('waits for a replacement transition when the first is cancelled mid-fade', async ({
     page,
   }) => {
     await page.setContent(PAGE)
     const host = page.locator('#host')
-    await host.evaluate((element) => {
-      const button = element.querySelector('button')
-      if (!button) throw new Error('no button')
-      button.disabled = false // fades up
-      button.getBoundingClientRect() // flush style so the transition starts
-      setTimeout(() => {
-        button.disabled = true // retarget: cancels the fade up, starts a fade down
-        setTimeout(() => {
-          button.disabled = false // and back up
-        }, 100)
-      }, 100)
-    })
+    await holdFade(host)
 
-    await settled(host)
+    await Promise.all([
+      settled(host),
+      host.locator('button').evaluate((button: HTMLButtonElement) => {
+        button.disabled = true // retarget: cancels the held fade, starts a fade down
+      }),
+    ])
 
     // Nothing finite is left running, and the button rests at its end state.
     const running = await host.evaluate(
@@ -42,7 +50,7 @@ test.describe('settled', () => {
     const opacity = await page
       .getByRole('button', { name: 'Send' })
       .evaluate((element) => getComputedStyle(element).opacity)
-    expect(opacity).toBe('1')
+    expect(opacity).toBe('0.5')
   })
 
   test('resolves when a finished animation holds its end state with fill forwards', async ({
@@ -69,16 +77,13 @@ test.describe('settled', () => {
   test('resolves when the animated element is removed mid-fade', async ({ page }) => {
     await page.setContent(PAGE)
     const host = page.locator('#host')
-    await host.evaluate((element) => {
-      const button = element.querySelector('button')
-      if (!button) throw new Error('no button')
-      button.disabled = false
-      button.getBoundingClientRect()
-      setTimeout(() => {
-        button.remove()
-      }, 100)
-    })
+    await holdFade(host)
 
-    await expect(settled(host)).resolves.toBeUndefined()
+    await Promise.all([
+      expect(settled(host)).resolves.toBeUndefined(),
+      host.locator('button').evaluate((button) => {
+        button.remove()
+      }),
+    ])
   })
 })

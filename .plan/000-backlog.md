@@ -18,7 +18,6 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] settled e2e test does not race its timers | stack:frontend
 - [ ] verify keeps the web server's output when e2e fails
 - [ ] admin can measure retrieval quality with an eval run
 - [ ] agent searches the knowledge base through our MCP server
@@ -27,11 +26,13 @@ Example: `- [ ] user can sign in with email`
 - [ ] agent remembers long-term knowledge across conversations
 - [ ] agent returns schema-validated structured results
 - [ ] admin can measure answer correctness with an eval run
+- [ ] admin can manage eval cases
 - [ ] agent runs have a spend cap
 - [ ] search has a global spend cap
 - [ ] concurrent searches are capped below the pool size
 - [ ] reloading a guarded route in development stays on that route | stack:frontend
 - [ ] starting a conversation is rate limited
+- [ ] starting an eval run is rate limited per admin
 - [ ] user can reset their password
 - [ ] user can delete a conversation
 - [ ] user can stop a running agent
@@ -52,3 +53,4 @@ Example: `- [ ] user can sign in with email`
 - [x] admin can connect a GitHub repository to the knowledge base (2026-10-31, plan 004)
 - [x] user can search the knowledge base with hybrid search (2026-10-31, plan 005)
 - [x] search is rate limited per user (2026-10-31, plan 006)
+- [x] settled e2e test does not race its timers (2026-10-31, plan 007)
