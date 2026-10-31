@@ -31,7 +31,7 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 - Persistent agent memory: conversation history distinct from long-term knowledge (planned)
 - Tool execution permissions: human approval for sensitive actions (planned)
 - Streaming responses: intermediate tool activity shown as it happens
-- Evaluation pipelines: retrieval quality and answer correctness measured (planned)
+- Evaluation pipelines: an admin measures retrieval quality with an eval run; answer correctness (planned)
 - Structured outputs: results validated against schemas (planned)
 
 ## Getting Started

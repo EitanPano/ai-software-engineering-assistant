@@ -133,6 +133,193 @@ export type ErrorBody = {
 }
 
 /**
+ * EvalCaseResult
+ */
+export type EvalCaseResult = {
+  /**
+   * Question
+   */
+  question: string
+  kind: 'identifier' | 'paraphrase' | 'no_answer'
+  skipReason: 'source_missing' | 'expected_chunk_missing' | null
+  /**
+   * Incomplete
+   */
+  incomplete: boolean
+  /**
+   * Rank
+   */
+  rank: number | null
+  recallAt5: number | null
+  recallAt10: number | null
+  recallAt20: number | null
+  reciprocalRank: number | null
+  ndcgAt10: number | null
+  /**
+   * Topcosine
+   */
+  topCosine: number | null
+  /**
+   * Relevantcosine
+   */
+  relevantCosine: number | null
+}
+
+/**
+ * EvalRun
+ */
+export type EvalRun = {
+  /**
+   * Id
+   */
+  id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  errorCode: 'no_runnable_case' | 'search_unavailable' | 'interrupted' | 'internal' | null
+  /**
+   * Casecount
+   */
+  caseCount: number
+  /**
+   * Skippedcasecount
+   */
+  skippedCaseCount: number
+  /**
+   * Incompletecasecount
+   */
+  incompleteCaseCount: number
+  headline: EvalScore | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * EvalRunDetail
+ */
+export type EvalRunDetail = {
+  /**
+   * Id
+   */
+  id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  errorCode: 'no_runnable_case' | 'search_unavailable' | 'interrupted' | 'internal' | null
+  /**
+   * Casecount
+   */
+  caseCount: number
+  /**
+   * Skippedcasecount
+   */
+  skippedCaseCount: number
+  /**
+   * Incompletecasecount
+   */
+  incompleteCaseCount: number
+  headline: EvalScore | null
+  createdAt: string
+  updatedAt: string
+  /**
+   * Scores
+   */
+  scores: Array<EvalScore>
+  /**
+   * Cases
+   */
+  cases: Array<EvalCaseResult>
+  /**
+   * Corpus
+   */
+  corpus: Array<{
+    /**
+     * Url
+     */
+    url: string
+    /**
+     * Ref
+     */
+    ref: string
+    /**
+     * Indexedcommit
+     */
+    indexedCommit: string
+    /**
+     * Chunkcount
+     */
+    chunkCount: number
+  }>
+  settings: {
+    /**
+     * Embeddingmodel
+     */
+    embeddingModel: string
+    /**
+     * Rrfk
+     */
+    rrfK: number
+    /**
+     * Candidates
+     */
+    candidates: number
+    /**
+     * Keywordcandidates
+     */
+    keywordCandidates: number
+    /**
+     * Trigramthreshold
+     */
+    trigramThreshold: number
+  } | null
+  cosine: {
+    /**
+     * Relevantmin
+     */
+    relevantMin: number | null
+    /**
+     * Relevantmedian
+     */
+    relevantMedian: number | null
+    /**
+     * Noanswermedian
+     */
+    noAnswerMedian: number | null
+    /**
+     * Noanswermax
+     */
+    noAnswerMax: number | null
+  } | null
+}
+
+/**
+ * EvalRunPage
+ */
+export type EvalRunPage = {
+  /**
+   * Items
+   */
+  items: Array<EvalRun>
+  /**
+   * Nextcursor
+   */
+  nextCursor: string | null
+}
+
+/**
+ * EvalScore
+ */
+export type EvalScore = {
+  search: 'hybrid' | 'semantic' | 'keyword'
+  kind: 'all' | 'identifier' | 'paraphrase'
+  /**
+   * Casecount
+   */
+  caseCount: number
+  recallAt5: number
+  recallAt10: number
+  recallAt20: number
+  mrr: number
+  ndcgAt10: number
+}
+
+/**
  * HealthResponse
  */
 export type HealthResponse = {
@@ -1492,3 +1679,132 @@ export type GetApiSearchResponses = {
 }
 
 export type GetApiSearchResponse = GetApiSearchResponses[keyof GetApiSearchResponses]
+
+export type GetApiEvalRunData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Cursor
+     */
+    cursor?: string
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: '/api/eval-run'
+}
+
+export type GetApiEvalRunErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiEvalRunError = GetApiEvalRunErrors[keyof GetApiEvalRunErrors]
+
+export type GetApiEvalRunResponses = {
+  /**
+   * A page of eval runs, newest first
+   */
+  200: EvalRunPage
+}
+
+export type GetApiEvalRunResponse = GetApiEvalRunResponses[keyof GetApiEvalRunResponses]
+
+export type PostApiEvalRunData = {
+  body?: never
+  path?: never
+  query?: never
+  url: '/api/eval-run'
+}
+
+export type PostApiEvalRunErrors = {
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type PostApiEvalRunError = PostApiEvalRunErrors[keyof PostApiEvalRunErrors]
+
+export type PostApiEvalRunResponses = {
+  /**
+   * The eval run, queued
+   */
+  201: EvalRun
+}
+
+export type PostApiEvalRunResponse = PostApiEvalRunResponses[keyof PostApiEvalRunResponses]
+
+export type GetApiEvalRunByIdData = {
+  body?: never
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/eval-run/{id}'
+}
+
+export type GetApiEvalRunByIdErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiEvalRunByIdError = GetApiEvalRunByIdErrors[keyof GetApiEvalRunByIdErrors]
+
+export type GetApiEvalRunByIdResponses = {
+  /**
+   * One eval run with its scores and cases
+   */
+  200: EvalRunDetail
+}
+
+export type GetApiEvalRunByIdResponse = GetApiEvalRunByIdResponses[keyof GetApiEvalRunByIdResponses]

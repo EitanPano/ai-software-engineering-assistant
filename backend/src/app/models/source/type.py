@@ -34,3 +34,14 @@ class Chunk:
     start_line: int
     end_line: int
     content: str
+
+
+@dataclass(frozen=True)
+class ChunkLines:
+    """Where a stored chunk lies: the commit its source was indexed at, the file and the lines
+    (1-based, inclusive). No content: a caller that only places chunks never reads one."""
+
+    commit: str
+    path: str
+    start_line: int
+    end_line: int

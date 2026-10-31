@@ -43,7 +43,7 @@ from app.models.auth.type import Caller
 from app.models.search.interface import SearchCounts, SearchHitRecord, SearchOutcome
 from app.models.source.enums import SourceErrorCode, SourceStatus
 from app.models.source.interface import ChunkRecord, DocumentRecord, SourceRecord
-from app.models.source.type import Chunk
+from app.models.source.type import Chunk, ChunkLines
 from app.models.user.enums import UserRole
 from app.services import github
 from app.services.chunk import chunk_text, language_of
@@ -413,6 +413,19 @@ async def search_ready_chunks(
             },
         )
     return SearchOutcome(hits=hits, incomplete=incomplete)
+
+
+async def list_ready_sources() -> list[SourceRecord]:
+    """Rule for the eval module: the sources a search reads, oldest first. System-wide."""
+    return await service.list_ready_sources()
+
+
+async def find_chunk_lines(*, commits: Sequence[str], paths: Sequence[str]) -> list[ChunkLines]:
+    """Rule for the eval module: where the stored chunks of the `ready` sources at `commits` lie
+    in `paths`, without their content."""
+    if not commits or not paths:
+        return []
+    return await service.find_chunk_lines(commits=commits, paths=paths)
 
 
 async def fail_lost_sources(started_before: datetime) -> int:

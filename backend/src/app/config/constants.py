@@ -220,6 +220,21 @@ SEARCH: Final = SearchSettings(
     embed_attempts=3,
     embed_attempt_seconds=5.0,
 )
+
+
+@dataclass(frozen=True)
+class EvalSettings:
+    """How an eval run behaves. A metric reads the first `depth` hits of a search; a run asks
+    `search_knowledge_base` for `hit_limit`, the whole union of three searches of `candidates`
+    (50), so one search gives each half's own top `depth` with no new query; the seed refuses more
+    than `max_cases` cases in total."""
+
+    depth: int
+    hit_limit: int
+    max_cases: int
+
+
+EVAL: Final = EvalSettings(depth=20, hit_limit=150, max_cases=200)
 # Directories and suffixes the index skips: not source text.
 SKIPPED_DIRECTORIES: Final = frozenset(
     {".git", "node_modules", "vendor", "dist", "build", "target", "__pycache__", ".venv", "venv"}

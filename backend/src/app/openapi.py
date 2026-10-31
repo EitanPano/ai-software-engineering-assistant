@@ -66,6 +66,11 @@ COMPONENTS: Final = frozenset(
         "ConnectSourceBody",
         "SearchHit",
         "SearchResult",
+        "EvalRun",
+        "EvalRunDetail",
+        "EvalRunPage",
+        "EvalScore",
+        "EvalCaseResult",
     }
 )
 

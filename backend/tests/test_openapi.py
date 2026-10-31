@@ -147,6 +147,8 @@ class TestTheDocument:
             "/api/source": {"get", "post"},
             "/api/source/{id}/indexing": {"post"},
             "/api/search": {"get"},
+            "/api/eval-run": {"get", "post"},
+            "/api/eval-run/{id}": {"get"},
         }
 
     def test_documents_the_user_list_query_and_its_page_component(self) -> None:
@@ -188,6 +190,33 @@ class TestTheDocument:
 
         get = as_object(as_object(as_object(doc["paths"])["/api/search"])["get"])
         assert set(as_object(get["responses"])) == {"200", "400", "401", "429", "500", "503"}
+
+    def test_documents_the_eval_run_routes_with_their_errors(self) -> None:
+        doc = build_openapi_document(app)
+
+        paths = as_object(doc["paths"])
+        start = as_object(as_object(paths["/api/eval-run"])["post"])
+        assert set(as_object(start["responses"])) == {"201", "401", "403", "409", "500"}
+        assert "requestBody" not in start
+        listing = as_object(as_object(paths["/api/eval-run"])["get"])
+        assert set(as_object(listing["responses"])) == {"200", "400", "401", "403", "500"}
+        one = as_object(as_object(paths["/api/eval-run/{id}"])["get"])
+        assert set(as_object(one["responses"])) == {"200", "400", "401", "403", "404", "500"}
+
+    def test_documents_the_eval_run_detail_beside_its_run(self) -> None:
+        doc = build_openapi_document(app)
+
+        schemas = as_object(as_object(doc["components"])["schemas"])
+        run = as_object(schemas["EvalRun"])
+        detail = as_object(schemas["EvalRunDetail"])
+        assert names(run["required"]) >= {"id", "status", "errorCode", "headline", "caseCount"}
+        assert names(detail["required"]) >= names(run["required"]) | {
+            "scores",
+            "cases",
+            "corpus",
+            "settings",
+            "cosine",
+        }
 
     def test_sets_the_document_metadata(self) -> None:
         doc = build_openapi_document(app)
@@ -262,6 +291,11 @@ class TestTheShaping:
                 "ConnectSourceBody",
                 "SearchHit",
                 "SearchResult",
+                "EvalRun",
+                "EvalRunDetail",
+                "EvalRunPage",
+                "EvalScore",
+                "EvalCaseResult",
             }
         )
 

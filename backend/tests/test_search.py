@@ -5,6 +5,7 @@ The ranking is proved on scripted vectors (`tests/fake_voyage.py`): this shows t
 filters work, not that the real model relates a paraphrase to its chunk (`tests/live_retrieval.py`).
 """
 
+import math
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, replace
@@ -527,6 +528,35 @@ class TestFusion:
         assert by_id[ids[1]].full_text_rank == 1
         assert [hit.chunk_id for hit in outcome.hits][:2] == [ids[1], ids[0]]
         assert by_id[ids[1]].score > by_id[ids[0]].score
+
+    async def test_cosine_is_one_minus_the_distance(self) -> None:
+        """A hit the semantic search returned carries its cosine; one only a keyword search found
+        carries none. The wire (`SearchHit`) does not: it is checked by
+        `test_a_hit_carries_its_source_and_file`."""
+        text = "alpha beta"
+        vector = fake_voyage.vector_of(text)
+        opposite = [-x for x in vector]
+        sideways = blank_vector("sideways", vector, 0.5)
+        _, ids = await add_source(
+            SourceStatus.ready,
+            "cosine",
+            [
+                Seed("nothing in common", vector),
+                Seed("nothing either", sideways),
+                Seed("alpha beta gamma", opposite),  # a word match, last in the semantic search
+                *far(SEARCH.candidates + 5),
+            ],
+        )
+
+        outcome = await run_search(text)
+
+        by_id = {hit.chunk_id: hit for hit in outcome.hits}
+        norm = math.sqrt(sum(x * x for x in sideways))
+        expected_sideways = sum(a * b for a, b in zip(vector, sideways, strict=True)) / norm
+        assert by_id[ids[0]].cosine == pytest.approx(1.0, abs=5e-3)
+        assert by_id[ids[1]].cosine == pytest.approx(expected_sideways, abs=5e-3)
+        assert by_id[ids[2]].semantic_rank is None
+        assert by_id[ids[2]].cosine is None
 
     async def test_equal_scores_order_by_chunk_id(self) -> None:
         text = "alpha beta"

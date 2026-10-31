@@ -7,6 +7,8 @@ import {
   getApiConversation,
   getApiConversationById,
   getApiConversationByIdMessage,
+  getApiEvalRun,
+  getApiEvalRunById,
   getApiHealth,
   getApiHealthReady,
   getApiSearch,
@@ -24,6 +26,7 @@ import {
   postApiAuthRegister,
   postApiConversation,
   postApiConversationByIdMessage,
+  postApiEvalRun,
   postApiSource,
   postApiSourceByIdIndexing,
 } from '../sdk.gen'
@@ -37,6 +40,12 @@ import type {
   GetApiConversationData,
   GetApiConversationError,
   GetApiConversationResponse,
+  GetApiEvalRunByIdData,
+  GetApiEvalRunByIdError,
+  GetApiEvalRunByIdResponse,
+  GetApiEvalRunData,
+  GetApiEvalRunError,
+  GetApiEvalRunResponse,
   GetApiHealthData,
   GetApiHealthError,
   GetApiHealthReadyData,
@@ -85,6 +94,9 @@ import type {
   PostApiConversationData,
   PostApiConversationError,
   PostApiConversationResponse,
+  PostApiEvalRunData,
+  PostApiEvalRunError,
+  PostApiEvalRunResponse,
   PostApiSourceByIdIndexingData,
   PostApiSourceByIdIndexingError,
   PostApiSourceByIdIndexingResponse,
@@ -668,4 +680,77 @@ export const getApiSearchOptions = (options: Options<GetApiSearchData>) =>
       return data
     },
     queryKey: getApiSearchQueryKey(options),
+  })
+
+export const getApiEvalRunQueryKey = (options?: Options<GetApiEvalRunData>) =>
+  createQueryKey('getApiEvalRun', options)
+
+/**
+ * List eval runs (admin)
+ */
+export const getApiEvalRunOptions = (options?: Options<GetApiEvalRunData>) =>
+  queryOptions<
+    GetApiEvalRunResponse,
+    GetApiEvalRunError,
+    GetApiEvalRunResponse,
+    ReturnType<typeof getApiEvalRunQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiEvalRun({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiEvalRunQueryKey(options),
+  })
+
+/**
+ * Start an eval run (admin)
+ */
+export const postApiEvalRunMutation = (
+  options?: Partial<Options<PostApiEvalRunData>>,
+): UseMutationOptions<PostApiEvalRunResponse, PostApiEvalRunError, Options<PostApiEvalRunData>> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiEvalRunResponse,
+    PostApiEvalRunError,
+    Options<PostApiEvalRunData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postApiEvalRun({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getApiEvalRunByIdQueryKey = (options: Options<GetApiEvalRunByIdData>) =>
+  createQueryKey('getApiEvalRunById', options)
+
+/**
+ * Get an eval run (admin)
+ */
+export const getApiEvalRunByIdOptions = (options: Options<GetApiEvalRunByIdData>) =>
+  queryOptions<
+    GetApiEvalRunByIdResponse,
+    GetApiEvalRunByIdError,
+    GetApiEvalRunByIdResponse,
+    ReturnType<typeof getApiEvalRunByIdQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiEvalRunById({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiEvalRunByIdQueryKey(options),
   })

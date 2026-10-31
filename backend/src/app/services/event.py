@@ -13,9 +13,11 @@ from typing import Final, TypedDict, cast
 from app.infra.pubsub import SubscriberEntry, Unsubscribe, pubsub
 
 __all__ = [
+    "EVAL_RUN_QUEUED",
     "RUN_CREATED",
     "SOURCE_QUEUED",
     "USER_REGISTERED",
+    "EvalRunQueued",
     "RunCreated",
     "SourceQueued",
     "Topic",
@@ -58,6 +60,14 @@ class SourceQueued(TypedDict):
 
 # Published by the source controller after a connect or a retry; `index_source` indexes it.
 SOURCE_QUEUED: Final = Topic[SourceQueued]("source.queued")
+
+
+class EvalRunQueued(TypedDict):
+    eval_run_id: str
+
+
+# Published by the eval controller after a start; `execute_eval_run` carries the run out.
+EVAL_RUN_QUEUED: Final = Topic[EvalRunQueued]("eval_run.queued")
 
 
 async def publish[P](topic: Topic[P], payload: P) -> None:

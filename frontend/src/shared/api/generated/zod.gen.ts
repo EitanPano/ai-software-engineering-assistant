@@ -88,6 +88,107 @@ export const zErrorBody = z.object({
 })
 
 /**
+ * EvalCaseResult
+ */
+export const zEvalCaseResult = z.object({
+  question: z.string(),
+  kind: z.enum(['identifier', 'paraphrase', 'no_answer']),
+  skipReason: z.enum(['source_missing', 'expected_chunk_missing']).nullable(),
+  incomplete: z.boolean(),
+  rank: z.int().nullable(),
+  recallAt5: z.number().gte(0).lte(1).nullable(),
+  recallAt10: z.number().gte(0).lte(1).nullable(),
+  recallAt20: z.number().gte(0).lte(1).nullable(),
+  reciprocalRank: z.number().gte(0).lte(1).nullable(),
+  ndcgAt10: z.number().gte(0).lte(1).nullable(),
+  topCosine: z.number().nullable(),
+  relevantCosine: z.number().nullable(),
+})
+
+/**
+ * EvalScore
+ */
+export const zEvalScore = z.object({
+  search: z.enum(['hybrid', 'semantic', 'keyword']),
+  kind: z.enum(['all', 'identifier', 'paraphrase']),
+  caseCount: z.int(),
+  recallAt5: z.number().gte(0).lte(1),
+  recallAt10: z.number().gte(0).lte(1),
+  recallAt20: z.number().gte(0).lte(1),
+  mrr: z.number().gte(0).lte(1),
+  ndcgAt10: z.number().gte(0).lte(1),
+})
+
+/**
+ * EvalRun
+ */
+export const zEvalRun = z.object({
+  id: z.string(),
+  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  errorCode: z
+    .enum(['no_runnable_case', 'search_unavailable', 'interrupted', 'internal'])
+    .nullable(),
+  caseCount: z.int(),
+  skippedCaseCount: z.int(),
+  incompleteCaseCount: z.int(),
+  headline: zEvalScore.nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+})
+
+/**
+ * EvalRunDetail
+ */
+export const zEvalRunDetail = z.object({
+  id: z.string(),
+  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  errorCode: z
+    .enum(['no_runnable_case', 'search_unavailable', 'interrupted', 'internal'])
+    .nullable(),
+  caseCount: z.int(),
+  skippedCaseCount: z.int(),
+  incompleteCaseCount: z.int(),
+  headline: zEvalScore.nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  scores: z.array(zEvalScore),
+  cases: z.array(zEvalCaseResult),
+  corpus: z.array(
+    z.object({
+      url: z.string(),
+      ref: z.string(),
+      indexedCommit: z.string(),
+      chunkCount: z.int(),
+    }),
+  ),
+  settings: z
+    .object({
+      embeddingModel: z.string(),
+      rrfK: z.int(),
+      candidates: z.int(),
+      keywordCandidates: z.int(),
+      trigramThreshold: z.number(),
+    })
+    .nullable(),
+  cosine: z
+    .object({
+      relevantMin: z.number().nullable(),
+      relevantMedian: z.number().nullable(),
+      noAnswerMedian: z.number().nullable(),
+      noAnswerMax: z.number().nullable(),
+    })
+    .nullable(),
+})
+
+/**
+ * EvalRunPage
+ */
+export const zEvalRunPage = z.object({
+  items: z.array(zEvalRun),
+  nextCursor: z.string().nullable(),
+})
+
+/**
  * HealthResponse
  */
 export const zHealthResponse = z.object({
@@ -557,3 +658,27 @@ export const zGetApiSearchQuery = z.object({
  * The best chunks of every ready source, best first
  */
 export const zGetApiSearchResponse = zSearchResult
+
+export const zGetApiEvalRunQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.int().gte(1).lte(100).optional().default(20),
+})
+
+/**
+ * A page of eval runs, newest first
+ */
+export const zGetApiEvalRunResponse = zEvalRunPage
+
+/**
+ * The eval run, queued
+ */
+export const zPostApiEvalRunResponse = zEvalRun
+
+export const zGetApiEvalRunByIdPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * One eval run with its scores and cases
+ */
+export const zGetApiEvalRunByIdResponse = zEvalRunDetail

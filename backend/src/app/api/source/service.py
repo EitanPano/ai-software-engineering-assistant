@@ -21,6 +21,7 @@ from app.config.constants import SEARCH
 from app.models.search.interface import SearchCounts, SearchHitRecord
 from app.models.source.enums import SourceErrorCode, SourceStatus
 from app.models.source.interface import ChunkRecord, DocumentRecord, SourceRecord
+from app.models.source.type import ChunkLines
 from app.services.db import Executor, execute, fetch_all, fetch_one, get_db
 from app.services.utils.pagination import Slice, decode_cursor, encode_cursor, to_page
 
@@ -305,6 +306,39 @@ async def list_active_sources_before(
     return [_to_record(row) for row in rows]
 
 
+async def list_ready_sources(*, db: Executor | None = None) -> list[SourceRecord]:
+    """The sources a search reads: every `ready` one, oldest first."""
+    rows = await fetch_all(
+        _SourceRow, _SELECT + "where status = 'ready' order by created_at, id", db=db
+    )
+    return [_to_record(row) for row in rows]
+
+
+@dataclass(frozen=True)
+class _ChunkLinesRow:
+    indexed_commit: str
+    path: str
+    start_line: int
+    end_line: int
+
+
+async def find_chunk_lines(
+    *, commits: Sequence[str], paths: Sequence[str], db: Executor | None = None
+) -> list[ChunkLines]:
+    """The lines of every chunk of a `ready` source indexed at one of `commits`, in one of
+    `paths`. Content is not selected."""
+    rows = await fetch_all(
+        _ChunkLinesRow,
+        "select s.indexed_commit, d.path, c.start_line, c.end_line from chunk c "
+        "join document d on d.id = c.document_id join source s on s.id = d.source_id "
+        "where s.status = 'ready' and s.indexed_commit = any(%s) and d.path = any(%s) "
+        "order by s.indexed_commit, d.path, c.start_line, c.id",
+        (list(commits), list(paths)),
+        db=db,
+    )
+    return [ChunkLines(r.indexed_commit, r.path, r.start_line, r.end_line) for r in rows]
+
+
 async def prepare_search(*, db: Executor) -> None:
     """The settings one search needs, for the transaction `db` holds (`set_config(..., true)` is
     `set local`). `strict_order` makes the HNSW scan go on past its first candidates when the
@@ -364,6 +398,7 @@ class _SearchRow:
     semantic_rank: int | None
     full_text_rank: int | None
     trigram_rank: int | None
+    cosine: float | None
 
 
 # Only chunks of `ready` sources can be a hit: a source still indexing has its chunks stored but
@@ -383,7 +418,8 @@ _READY: Final[LiteralString] = (
 # `<%` escaped; with a null token it matches nothing.
 SEARCH_STATEMENT: Final[LiteralString] = (
     "with semantic as ("  # noqa: S608  # constant text; every value is a parameter
-    " select nearest.id, row_number() over (order by nearest.dist, nearest.id) as rank from ("
+    " select nearest.id, nearest.dist,"
+    "  row_number() over (order by nearest.dist, nearest.id) as rank from ("
     "  select c.id, c.embedding <=> %s::halfvec(1024) as dist from chunk c where " + _READY + ""
     "  order by c.embedding <=> %s::halfvec(1024) limit %s"
     " ) nearest"
@@ -409,7 +445,8 @@ SEARCH_STATEMENT: Final[LiteralString] = (
     "  c.end_line, c.content,"
     "  coalesce(1.0 / (%s + se.rank), 0) + coalesce(1.0 / (%s + ke.rank), 0)"
     "   + coalesce(1.0 / (%s + tr.rank), 0) as score,"
-    "  se.rank as semantic_rank, ke.rank as full_text_rank, tr.rank as trigram_rank"
+    "  se.rank as semantic_rank, ke.rank as full_text_rank, tr.rank as trigram_rank,"
+    "  1 - se.dist as cosine"
     " from (select id from semantic union select id from keyword union select id from trigram) ids"
     " join chunk c on c.id = ids.id join document d on d.id = c.document_id"
     " join source s on s.id = d.source_id"
@@ -421,7 +458,7 @@ SEARCH_STATEMENT: Final[LiteralString] = (
     " (select coalesce(max(matched), 0) from trigram)::int as trigram_found,"
     " hits.chunk_id, hits.source_id, hits.url, hits.ref, hits.path, hits.symbol, hits.start_line,"
     " hits.end_line, hits.content, hits.score::float8 as score, hits.semantic_rank::int,"
-    " hits.full_text_rank::int, hits.trigram_rank::int"
+    " hits.full_text_rank::int, hits.trigram_rank::int, hits.cosine::float8 as cosine"
     " from (select 1) one left join hits on true order by hits.score desc nulls last, hits.chunk_id"
 )
 
@@ -493,4 +530,5 @@ def _to_hit(row: _SearchRow) -> SearchHitRecord | None:
         semantic_rank=row.semantic_rank,
         full_text_rank=row.full_text_rank,
         trigram_rank=row.trigram_rank,
+        cosine=row.cosine,
     )

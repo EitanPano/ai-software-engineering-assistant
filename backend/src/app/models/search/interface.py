@@ -25,6 +25,9 @@ class SearchHitRecord:
     semantic_rank: int | None
     full_text_rank: int | None
     trigram_rank: int | None
+    # One minus the semantic search's cosine distance: null when that search did not return the
+    # chunk. Never on the wire (`SearchHit`): the eval run reads it as the evidence for a cutoff.
+    cosine: float | None = None
 
 
 @dataclass(frozen=True)

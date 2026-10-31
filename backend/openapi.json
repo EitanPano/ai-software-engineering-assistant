@@ -1618,6 +1618,229 @@
           }
         }
       }
+    },
+    "/api/eval-run": {
+      "post": {
+        "tags": [
+          "eval-run"
+        ],
+        "summary": "Start an eval run (admin)",
+        "responses": {
+          "201": {
+            "description": "The eval run, queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "eval-run"
+        ],
+        "summary": "List eval runs (admin)",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of eval runs, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/eval-run/{id}": {
+      "get": {
+        "tags": [
+          "eval-run"
+        ],
+        "summary": "Get an eval run (admin)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One eval run with its scores and cases",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1864,6 +2087,544 @@
           "requestId"
         ],
         "title": "ErrorBody"
+      },
+      "EvalCaseResult": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "identifier",
+              "paraphrase",
+              "no_answer"
+            ]
+          },
+          "skipReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "source_missing",
+                  "expected_chunk_missing"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "incomplete": {
+            "type": "boolean",
+            "title": "Incomplete"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "recallAt5": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recallAt10": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recallAt20": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reciprocalRank": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ndcgAt10": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "topCosine": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topcosine"
+          },
+          "relevantCosine": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevantcosine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question",
+          "kind",
+          "skipReason",
+          "incomplete",
+          "rank",
+          "recallAt5",
+          "recallAt10",
+          "recallAt20",
+          "reciprocalRank",
+          "ndcgAt10",
+          "topCosine",
+          "relevantCosine"
+        ],
+        "title": "EvalCaseResult"
+      },
+      "EvalRun": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed"
+            ]
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_runnable_case",
+                  "search_unavailable",
+                  "interrupted",
+                  "internal"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "caseCount": {
+            "type": "integer",
+            "title": "Casecount"
+          },
+          "skippedCaseCount": {
+            "type": "integer",
+            "title": "Skippedcasecount"
+          },
+          "incompleteCaseCount": {
+            "type": "integer",
+            "title": "Incompletecasecount"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "errorCode",
+          "caseCount",
+          "skippedCaseCount",
+          "incompleteCaseCount",
+          "headline",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "EvalRun"
+      },
+      "EvalRunDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed"
+            ]
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_runnable_case",
+                  "search_unavailable",
+                  "interrupted",
+                  "internal"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "caseCount": {
+            "type": "integer",
+            "title": "Casecount"
+          },
+          "skippedCaseCount": {
+            "type": "integer",
+            "title": "Skippedcasecount"
+          },
+          "incompleteCaseCount": {
+            "type": "integer",
+            "title": "Incompletecasecount"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scores": {
+            "items": {
+              "$ref": "#/components/schemas/EvalScore"
+            },
+            "type": "array",
+            "title": "Scores"
+          },
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/EvalCaseResult"
+            },
+            "type": "array",
+            "title": "Cases"
+          },
+          "corpus": {
+            "items": {
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "title": "Url"
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Ref"
+                },
+                "indexedCommit": {
+                  "type": "string",
+                  "title": "Indexedcommit"
+                },
+                "chunkCount": {
+                  "type": "integer",
+                  "title": "Chunkcount"
+                }
+              },
+              "type": "object",
+              "required": [
+                "url",
+                "ref",
+                "indexedCommit",
+                "chunkCount"
+              ],
+              "title": "EvalCorpus"
+            },
+            "type": "array",
+            "title": "Corpus"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "properties": {
+                  "embeddingModel": {
+                    "type": "string",
+                    "title": "Embeddingmodel"
+                  },
+                  "rrfK": {
+                    "type": "integer",
+                    "title": "Rrfk"
+                  },
+                  "candidates": {
+                    "type": "integer",
+                    "title": "Candidates"
+                  },
+                  "keywordCandidates": {
+                    "type": "integer",
+                    "title": "Keywordcandidates"
+                  },
+                  "trigramThreshold": {
+                    "type": "number",
+                    "title": "Trigramthreshold"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "embeddingModel",
+                  "rrfK",
+                  "candidates",
+                  "keywordCandidates",
+                  "trigramThreshold"
+                ],
+                "title": "EvalRunSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cosine": {
+            "anyOf": [
+              {
+                "properties": {
+                  "relevantMin": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Relevantmin"
+                  },
+                  "relevantMedian": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Relevantmedian"
+                  },
+                  "noAnswerMedian": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Noanswermedian"
+                  },
+                  "noAnswerMax": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Noanswermax"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "relevantMin",
+                  "relevantMedian",
+                  "noAnswerMedian",
+                  "noAnswerMax"
+                ],
+                "title": "EvalCosine"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "errorCode",
+          "caseCount",
+          "skippedCaseCount",
+          "incompleteCaseCount",
+          "headline",
+          "createdAt",
+          "updatedAt",
+          "scores",
+          "cases",
+          "corpus",
+          "settings",
+          "cosine"
+        ],
+        "title": "EvalRunDetail"
+      },
+      "EvalRunPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRun"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "EvalRunPage"
+      },
+      "EvalScore": {
+        "properties": {
+          "search": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "semantic",
+              "keyword"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "all",
+              "identifier",
+              "paraphrase"
+            ]
+          },
+          "caseCount": {
+            "type": "integer",
+            "title": "Casecount"
+          },
+          "recallAt5": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0
+          },
+          "recallAt10": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0
+          },
+          "recallAt20": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0
+          },
+          "mrr": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0
+          },
+          "ndcgAt10": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "search",
+          "kind",
+          "caseCount",
+          "recallAt5",
+          "recallAt10",
+          "recallAt20",
+          "mrr",
+          "ndcgAt10"
+        ],
+        "title": "EvalScore"
       },
       "HealthResponse": {
         "properties": {

@@ -18,7 +18,6 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] admin can measure retrieval quality with an eval run
 - [ ] agent searches the knowledge base through our MCP server
 - [ ] user approves sensitive tool calls
 - [ ] agent acts on GitHub through the GitHub MCP server
@@ -54,3 +53,4 @@ Example: `- [ ] user can sign in with email`
 - [x] search is rate limited per user (2026-10-31, plan 006)
 - [x] settled e2e test does not race its timers (2026-10-31, plan 007)
 - [x] verify keeps the web server's output when e2e fails (2026-10-31, plan 008)
+- [x] admin can measure retrieval quality with an eval run (2026-10-31, plan 009)

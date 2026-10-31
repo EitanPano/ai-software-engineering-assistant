@@ -81,9 +81,10 @@ src/app/
                       (health, auth, user; conversation: the reference to copy; run: the
                       agent's runs; agent: the loop, a controller only; source: connected
                       repositories and their index; search: hybrid search over the ready
-                      chunks, a controller only, the chunks being the source module's; see Search)
+                      chunks, a controller only, the chunks being the source module's; see Search;
+                      eval: admin-run retrieval measurements, see Evals)
   models/<name>/      interface · type · enums · constants (auth, session, user,
-                      conversation, run, source, search)
+                      conversation, run, source, search, eval)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
                       asgi (helpers the ASGI middleware share)
@@ -92,12 +93,13 @@ src/app/
                       github.py · voyage.py · chunk.py · parse.py · parse_worker.py
     security/         crypto · jwt · cookies · otp
     communicate/      __init__.py · console · mail · sms · whatsapp · templates/
-    utils/            error · openapi · clock · api_model · pagination · postgres_error (pure, no I/O)
+    utils/            error · openapi · clock · api_model · pagination · postgres_error · retrieval_metric (pure, no I/O)
   infra/              dependency.py · loop.py · memory.py · postgres.py · pubsub.py · scheduler.py
     jobs/             one file per background job: session_cleanup
-    subscribers/      one file per event reaction: send_welcome, execute_run, index_source
+    subscribers/      one file per event reaction: send_welcome, execute_run, index_source, execute_eval_run
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
-    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin); seed is reserved
+    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals)
+    eval_cases/       the labelled case files the seed reads (click-8.5.0.json)
 tests/                mirrors src/app/ (a package throughout, so two test_x.py cannot clash)
 openapi.json          the committed contract, written by the `contract` command
 ```
@@ -485,7 +487,8 @@ changes only by plan.
   the pool, and a request with no token is a 401 that counts nothing. The window is fixed, so up
   to 10 pass across a boundary, which the pool of 10 connections holds at once. It bounds one
   account: many accounts still reach the pool and Voyage's total, and a call to
-  `search_knowledge_base` that is not this route (the `knowledge` MCP server) is not limited here.
+  `search_knowledge_base` that is not this route (the `knowledge` MCP server, and an eval run, see
+  Evals) is not limited here.
   `TestRateLimit` in `tests/test_search.py` counts from the constant, never a literal, and each
   caller holds one `headers`, because `member_bearer()` mints a new caller on every call.
 - Exported rules. `api/search/controller.py › search_knowledge_base(text=, limit=)` embeds the text
@@ -529,6 +532,38 @@ changes only by plan.
 - Voyage's 429: the index path waits what `Retry-After` says in whole seconds, at most 2 minutes,
   or about a minute with none usable (an HTTP-date counts as none); a search never waits, it spends
   its 3 attempts and answers 503.
+
+## Evals
+
+- Endpoints, all admin-only (`require_role(UserRole.admin)`, rechecked in each handler):
+  `POST /api/eval-run` (201 `queued`; a second start while one is active is a 409 from the partial
+  unique index), `GET /api/eval-run` (newest first, `case_result` left out of a page) and
+  `GET /api/eval-run/{id}`. No rate limit of its own: the admin role and the one active run bound
+  it. Only an admin's click starts a paid run; nothing retries one, and the boot sweep
+  (`sweep_lost_eval_runs`, beside the other two in `main.py`) ends a lost run `interrupted` and
+  never requeues it.
+- A run has `index_source`'s shape: a `queued` row, `eval_run.queued`, `infra/subscribers/
+  execute_eval_run.py` calling `api/eval/controller.py › execute_eval_run`, a conditional claim, one
+  end on every exit. It calls `search_knowledge_base(text=, limit=EVAL.hit_limit)` (150, the whole
+  union of the three searches of 50), never `GET /api/search`, whose per-user window would stretch it.
+  A case runs only against a `ready` source whose `indexed_commit` equals the case's pinned commit and
+  only when a stored chunk matches each expected chunk (`source` exports `list_ready_sources` and
+  `find_chunk_lines`); otherwise it is skipped, counted and spends nothing. A run is all or nothing:
+  one failed search fails it (`search_unavailable`) and stores no scores.
+- Metrics (`services/utils/retrieval_metric.py`, pure): a hit is relevant when it lies in the same file
+  at the same commit and shares at least half of the shorter range; an expected chunk counts at its
+  first relevant hit, and nDCG gains once per rank; recall@5/10/20, MRR and nDCG@10 per search
+  (`hybrid`, `semantic`, `keyword`, each
+  ordering rebuilt from the hit's ranks) and kind. `no_answer` cases enter no mean, only `cosine`
+  (`SearchHitRecord.cosine`, one minus the semantic distance, never on the `GET /api/search` wire).
+  A run stores ranks, cosines, questions, its corpus and settings, never a hit's content.
+- Cases: `uv run python -m app.infra.scripts.seed_eval_case src/app/infra/eval_cases/click-8.5.0.json`
+  (free; replaces that commit's cases in one transaction, refuses a total over `EVAL.max_cases`, exits
+  1 writing nothing on a bad file). `uv run python -m tests.check_eval_cases` (free, in no gate:
+  only the script reads the installed click 8.5.0 and holds the labels to it; `check` holds the file's
+  shape and the checking logic on a synthetic source, in `tests/test_search_scripts.py`).
+  Tests run on `tests/eval_support.py` (the fixture repository's cases) and `tests/seed_eval_fixture.py`
+  (`python -m tests.seed_eval_fixture` loads them for e2e).
 
 ## The engine seam
 

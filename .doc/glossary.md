@@ -32,14 +32,17 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | hybrid search | Semantic and keyword search fused with reciprocal rank fusion (RRF) | module `search`, route `/api/search` |
 | search hit | One chunk a search returns, with its repository, file, line range and ranks | `SearchHit`, `entity/chunk` |
 | memory | Long-term knowledge about a user, distinct from conversation history | table `memory`, route `/api/memory`, module `memory` |
-| eval case | One question with its expected chunks and expected answer | table `eval_case` |
-| eval run | One execution of the eval cases, with its scores | table `eval_run`, route `/api/eval-run`, module `eval` |
+| eval case | One labelled question, of a kind, pinned to a commit; the correctness task adds its expected answer | table `eval_case` |
+| expected chunk | A label: lines of one file at a pinned commit that a good answer must contain; never a chunk id | `EvalExpectedChunk`, column `eval_case.expected_chunk` |
+| identifier, paraphrase, no_answer | The kinds of eval case: names a symbol; shares no identifier with its lines; cannot be answered from the corpus, so it enters no mean, only the cosine evidence | column `eval_case.kind` |
+| eval run | One execution of the eval cases, with its corpus, settings and scores | table `eval_run`, route `/api/eval-run`, module `eval` |
 | approve | Allow a pending tool call to execute | `feature/approve` |
 | reject | Refuse a pending tool call; the agent receives a denied result | `feature/reject` |
 | connect | Add a source and index it | `feature/connect` |
 | start | Begin a new empty conversation | `feature/start-conversation` |
 | send | Add a user message to a conversation and start a run | `feature/send-message` |
 | search | Find the chunks of `ready` sources for a text | `feature/search` |
+| measure | Start an eval run | `feature/measure` |
 
 ## Actions
 

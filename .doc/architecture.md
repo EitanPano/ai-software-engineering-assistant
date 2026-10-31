@@ -57,6 +57,11 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
 12. Memory: `message` rows are one conversation's history. `memory` rows are per-user long-term
     knowledge, extracted after a conversation and retrieved by the agent; the user can list and
     delete them.
+13. Eval run: an admin's click stores a `queued` `eval_run`, and a bus reaction executes it beside
+    the request, one at a time, through `search_knowledge_base`, the rule the route's limit does
+    not reach. A case runs only against a `ready` source at its pinned commit. Scores are stored per
+    search and per case, with the corpus and settings, never a hit's content; the next boot's sweep
+    ends a lost run as `interrupted`, and nothing restarts one, because a run spends money.
 
 Repository content is untrusted input and prompt injection can steer tool calls, so tool results
 never widen permissions and approval is the control on every write. No tool executes code in v1.
@@ -98,8 +103,10 @@ Planned; each task's migration creates its tables and the code wins on conflict.
 - `chunk`: `document`; symbol, line range, content, embedding, and the stored `keyword` that
   full-text search reads.
 - `memory`: owner `user`; content, embedding, originating `conversation`.
-- `eval_case`: question, expected chunks, expected answer.
-- `eval_run`: scores per metric and per case.
+- `eval_case`: pinned commit, kind, question, expected chunks; the correctness task adds the
+  expected answer.
+- `eval_run`: status, error code, counts, scores, per-case results, cosine evidence, corpus and
+  settings.
 
 ## API
 
@@ -199,6 +206,13 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-31: retrieval evals. Routes `POST` and `GET /api/eval-run` and `GET /api/eval-run/{id}`,
+  admin only, and tables `eval_case` and `eval_run` (`0008-eval.sql`). A partial unique index allows
+  one active run, and a second start is a 409. A run calls `search_knowledge_base` directly, so
+  `search_per_user` does not reach it; the admin role and the one active run bound it, and it has
+  no rate limit or spend cap of its own yet. `SearchHitRecord.cosine` is internal: the
+  `GET /api/search` wire and every ranking are unchanged. Cases are seeded by
+  `infra/scripts/seed_eval_case.py`, from `infra/eval_cases/`.
 - 2026-10-31: search limit. `GET /api/search` takes `RATE_LIMITS.search_per_user`, 5 a minute per
   user, after `require_auth`, and answers 429 `rate_limited` before any call to Voyage and before
   any pooled connection. It bounds one account: total spend and the pool across accounts stay open,

@@ -131,10 +131,12 @@ ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.send_welcome",
   "app.infra.pubsub -> app.infra.subscribers.execute_run",
   "app.infra.pubsub -> app.infra.subscribers.index_source",
-  # The boot sweeps import the run and source rules inside their functions, after every resource
-  # is connected.
+  "app.infra.pubsub -> app.infra.subscribers.execute_eval_run",
+  # The boot sweeps import the run, source and eval rules inside their functions, after every
+  # resource is connected.
   "app.infra.dependency -> app.api.run.controller",
   "app.infra.dependency -> app.api.source.controller",
+  "app.infra.dependency -> app.api.eval.controller",
 ]
 
 # Leaves: models/ imports models/ only (not even pydantic: the wire shape is in a module's schema).
@@ -450,6 +452,7 @@ allow_indirect_imports = true
 ignore_imports = [
   "app.infra.dependency -> app.api.run.controller",
   "app.infra.dependency -> app.api.source.controller",
+  "app.infra.dependency -> app.api.eval.controller",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -649,8 +652,10 @@ ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.send_welcome",
   "app.infra.pubsub -> app.infra.subscribers.execute_run",
   "app.infra.pubsub -> app.infra.subscribers.index_source",
+  "app.infra.pubsub -> app.infra.subscribers.execute_eval_run",
   "app.infra.dependency -> app.api.run.controller",
   "app.infra.dependency -> app.api.source.controller",
+  "app.infra.dependency -> app.api.eval.controller",
   "app.api.*.controller -> app.api.*.controller",
   "app.api.*.controller -> app.api.*.schema",
   "app.api.*.schema -> app.api.*.schema",

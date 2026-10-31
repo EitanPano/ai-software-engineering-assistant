@@ -22,7 +22,12 @@ import uvicorn
 from fastapi import FastAPI
 
 from app.config.env import defaulted_secrets, env
-from app.infra.dependency import resource_lifespan, sweep_lost_runs, sweep_lost_sources
+from app.infra.dependency import (
+    resource_lifespan,
+    sweep_lost_eval_runs,
+    sweep_lost_runs,
+    sweep_lost_sources,
+)
 from app.server import create_app
 from app.services.logger import configure_logging, log
 
@@ -43,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # on a lost run before its `run_finished` is written.
         await sweep_lost_runs()
         await sweep_lost_sources()
+        await sweep_lost_eval_runs()
         yield
 
 

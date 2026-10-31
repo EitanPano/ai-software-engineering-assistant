@@ -8,4 +8,5 @@ export const NAV: NavEntry[] = [
   { to: '/conversation', label: 'Conversations' },
   { to: '/search', label: 'Search' },
   { to: '/source', label: 'Sources', role: 'admin' },
+  { to: '/eval-run', label: 'Eval runs', role: 'admin' },
 ]

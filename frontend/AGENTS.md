@@ -138,6 +138,12 @@ A mutation is a hook in `feature/<action>/api/<action>.ts`: `useMutation` with
   `fieldErrors` on those fields (copy key `validation_failed:<path>`). `options.discriminator`
   reads a second key from the envelope when the product's contract adds one
   (`conflict:slot_taken`).
+- **A paid start** (`feature/measure`, which starts an eval run) sets `retry: false` and
+  `networkMode: 'always'` on the mutation. The client already never retries a mutation, but a
+  mutation paused offline resumes by itself on reconnect (`QueryClient.mount`); `'always'` sends it
+  at once and lets it fail instead. Nothing else may send it: no loader, query or effect, so `Try
+again`, focus and reconnect only read. `eval-run-routes.test.tsx › starts no run the user did
+not ask for` pins it. A 401's one retry (Auth) still re-sends a start the gate refused.
 - The component awaits `mutateAsync` in its handler and shows the outcome **after the await**:
   a toast, or `reportFailure(form.setError, error)` for a form. Never fire a toast from an effect.
 
@@ -201,8 +207,8 @@ returnTo?)` throws a redirect to `/sign-in?next=…`; `requireRole(queryClient, 
   in in the query cache and the hint; the form navigates to a safe `next` path (`safeNextPath`
   accepts only a path on this site). Sign-out clears the cache and the hint whatever the API said.
 - **Staff pages.** Put them under a pathless route whose loader calls `requireRole(queryClient,
-'admin')`, and give every staff loader the same call. `/source` and `/source/connect` are the
-  staff pages; the first admin is made with the server's `grant_admin` script.
+'admin')`, and give every staff loader the same call. `/source`, `/source/connect`, `/eval-run`
+  and `/eval-run/:id` are the staff pages; the first admin is made with the server's `grant_admin` script.
 - **Renaming the roles.** The template's roles are `user` and `admin`. A product that renames them
   changes the role type guard in `shared/auth/session.ts` (it accepts only those two values, so
   an account with another role reads as signed out), every `requireRole(...)` call, the role-gated layout
@@ -360,6 +366,11 @@ tests.fake_anthropic` from `backend/` on port 8101, before the API, and points t
   script through `execFileSync` with the password on stdin and `account.databaseUrl` as
   `DATABASE_URL`; it ends the account's sessions, so every admin journey (`signInAsAdmin`) signs
   out and in again through the UI.
+- **Eval runs.** `eval-run.spec.ts` seeds the fixture's eval cases with `seedEvalCases`
+  (`eval-run-support.ts`), which runs the backend's `tests.seed_eval_fixture` on
+  `account.databaseUrl` only. The one active run is global and journeys run in parallel, so
+  `startRun` accepts a 409 and the journey waits for any completed row. `/eval-run` and
+  `/eval-run-detail` are in `SIGNED_IN_ROUTES` (the latter with `grantAdminWithCases`).
 - **A role on a nav entry.** `NavEntry.role` (optional) limits an entry in `app/nav.ts` to accounts
   with that role; `(site)/layout.tsx` filters the table through `useCurrentUser`. It is cosmetic:
   the route's loader and the API enforce the role.

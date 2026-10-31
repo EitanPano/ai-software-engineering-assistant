@@ -19,6 +19,12 @@ import type {
   GetApiConversationData,
   GetApiConversationErrors,
   GetApiConversationResponses,
+  GetApiEvalRunByIdData,
+  GetApiEvalRunByIdErrors,
+  GetApiEvalRunByIdResponses,
+  GetApiEvalRunData,
+  GetApiEvalRunErrors,
+  GetApiEvalRunResponses,
   GetApiHealthData,
   GetApiHealthErrors,
   GetApiHealthReadyData,
@@ -71,6 +77,9 @@ import type {
   PostApiConversationData,
   PostApiConversationErrors,
   PostApiConversationResponses,
+  PostApiEvalRunData,
+  PostApiEvalRunErrors,
+  PostApiEvalRunResponses,
   PostApiSourceByIdIndexingData,
   PostApiSourceByIdIndexingErrors,
   PostApiSourceByIdIndexingResponses,
@@ -419,3 +428,35 @@ export const getApiSearch = <ThrowOnError extends boolean = false>(
     url: '/api/search',
     ...options,
   })
+
+/**
+ * List eval runs (admin)
+ */
+export const getApiEvalRun = <ThrowOnError extends boolean = false>(
+  options?: Options<GetApiEvalRunData, ThrowOnError>,
+): RequestResult<GetApiEvalRunResponses, GetApiEvalRunErrors, ThrowOnError> =>
+  (options?.client ?? client).get<GetApiEvalRunResponses, GetApiEvalRunErrors, ThrowOnError>({
+    url: '/api/eval-run',
+    ...options,
+  })
+
+/**
+ * Start an eval run (admin)
+ */
+export const postApiEvalRun = <ThrowOnError extends boolean = false>(
+  options?: Options<PostApiEvalRunData, ThrowOnError>,
+): RequestResult<PostApiEvalRunResponses, PostApiEvalRunErrors, ThrowOnError> =>
+  (options?.client ?? client).post<PostApiEvalRunResponses, PostApiEvalRunErrors, ThrowOnError>({
+    url: '/api/eval-run',
+    ...options,
+  })
+
+/**
+ * Get an eval run (admin)
+ */
+export const getApiEvalRunById = <ThrowOnError extends boolean = false>(
+  options: Options<GetApiEvalRunByIdData, ThrowOnError>,
+): RequestResult<GetApiEvalRunByIdResponses, GetApiEvalRunByIdErrors, ThrowOnError> =>
+  (options.client ?? client).get<GetApiEvalRunByIdResponses, GetApiEvalRunByIdErrors, ThrowOnError>(
+    { url: '/api/eval-run/{id}', ...options },
+  )

@@ -192,6 +192,22 @@ async def sweep_lost_sources(*, logger: Logger = log) -> None:
         logger.error("lost source sweep failed", {"step": "sweep_lost_sources"}, error)
 
 
+async def sweep_lost_eval_runs(*, logger: Logger = log) -> None:
+    """Ends the eval runs a previous process left `queued` or `running`, once, beside the other
+    sweeps and for the same reason. Each ends `failed` as `interrupted` and is never requeued: a
+    run costs money, so only an admin's click starts another. A failed sweep is logged and the
+    boot continues.
+
+    Imported inside the function, like the others: the module is above `infra` in the layer map.
+    """
+    from app.api.eval.controller import fail_lost_eval_runs
+
+    try:
+        await fail_lost_eval_runs(clock.now())
+    except Exception as error:
+        logger.error("lost eval run sweep failed", {"step": "sweep_lost_eval_runs"}, error)
+
+
 def resource_lifespan(
     resources: Sequence[Resource] | None = None,
     *,

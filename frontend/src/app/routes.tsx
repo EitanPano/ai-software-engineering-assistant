@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { Outlet, type RouteObject } from 'react-router'
 
 import { conversationListQuery, conversationQuery } from '@/entity/conversation/api/conversation'
+import { evalRunListQuery, evalRunQuery } from '@/entity/eval-run/api/eval-run'
 import { healthQuery } from '@/entity/health/api/health'
 import { messageListQuery } from '@/entity/message/api/message'
 import { sourceListQuery } from '@/entity/source/api/source'
@@ -15,6 +16,8 @@ import SignUpPage from './(auth)/sign-up/page'
 import ConversationPage from './(site)/conversation/[id]/page'
 import ConversationListPage from './(site)/conversation/page'
 import SiteError from './(site)/error'
+import EvalRunPage from './(site)/eval-run/[id]/page'
+import EvalRunListPage from './(site)/eval-run/page'
 import ForbiddenPage from './(site)/forbidden/page'
 import SiteLayout from './(site)/layout'
 import SiteLoading from './(site)/loading'
@@ -108,6 +111,23 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                       loader: ({ request }) =>
                         requireRole(queryClient, 'admin', returnToOf(request)),
                       Component: ConnectSourcePage,
+                    },
+                    {
+                      // Reads only: the loader prefetches the list and sends no start.
+                      path: 'eval-run',
+                      loader: async ({ request }) => {
+                        await requireRole(queryClient, 'admin', returnToOf(request))
+                        return queryClient.infiniteQuery(evalRunListQuery())
+                      },
+                      Component: EvalRunListPage,
+                    },
+                    {
+                      path: 'eval-run/:id',
+                      loader: async ({ params, request }) => {
+                        await requireRole(queryClient, 'admin', returnToOf(request))
+                        return queryClient.query(evalRunQuery(params.id ?? ''))
+                      },
+                      Component: EvalRunPage,
                     },
                   ],
                 },

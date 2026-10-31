@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import pytest
 from fastapi import FastAPI
 
-from app.infra.dependency import sweep_lost_runs, sweep_lost_sources
+from app.infra.dependency import sweep_lost_eval_runs, sweep_lost_runs, sweep_lost_sources
 from app.main import lifespan
 from tests.support import recording_logger
 
@@ -34,10 +34,22 @@ class TestTheEntryLifespanSweeps:
         monkeypatch.setattr("app.main.sweep_lost_runs", runs)
         monkeypatch.setattr("app.main.sweep_lost_sources", sources)
 
+        async def eval_runs() -> None:
+            order.append("sweep eval runs")
+
+        monkeypatch.setattr("app.main.sweep_lost_eval_runs", eval_runs)
+
         async with lifespan(FastAPI()):
             order.append("serving")
 
-        assert order == ["connected", "sweep runs", "sweep sources", "serving", "closed"]
+        assert order == [
+            "connected",
+            "sweep runs",
+            "sweep sources",
+            "sweep eval runs",
+            "serving",
+            "closed",
+        ]
 
 
 class TestSweepLostSources:
@@ -68,6 +80,38 @@ class TestSweepLostSources:
         await sweep_lost_sources(logger=logger)
 
         assert any(line.startswith("error lost source sweep failed") for line in sink.lines), (
+            sink.lines
+        )
+
+
+class TestSweepLostEvalRuns:
+    async def test_runs_the_eval_modules_sweep_with_the_boot_time(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[object] = []
+
+        async def fake_sweep(started_before: object) -> int:
+            seen.append(started_before)
+            return 0
+
+        monkeypatch.setattr("app.api.eval.controller.fail_lost_eval_runs", fake_sweep)
+
+        await sweep_lost_eval_runs()
+
+        assert len(seen) == 1
+
+    async def test_a_failed_sweep_is_logged_and_the_boot_continues(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def broken(started_before: object) -> int:
+            raise RuntimeError("the database is unreachable")
+
+        monkeypatch.setattr("app.api.eval.controller.fail_lost_eval_runs", broken)
+        logger, sink = recording_logger()
+
+        await sweep_lost_eval_runs(logger=logger)
+
+        assert any(line.startswith("error lost eval run sweep failed") for line in sink.lines), (
             sink.lines
         )
 

@@ -5,6 +5,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { NAV } from '../../src/app/nav'
 
 import { fillSignIn, registerThroughUi, signOutThroughUi } from './auth-support'
+import { COMPLETED, completedRun, grantAdminWithCases, startRun } from './eval-run-support'
 import { capturedRoutes } from './screen-routes'
 import { LONG_LINE_QUERY, expectHit } from './search-support'
 import { REPOSITORY, connectRepository, grantAdmin, sourceRow, uniqueToken } from './source-support'
@@ -52,6 +53,27 @@ const SIGNED_IN_ROUTES: {
     },
   },
   { route: '/source/connect', setup: grantAdmin },
+  { route: '/eval-run', setup: grantAdmin },
+  {
+    // A completed run's record: the account is promoted and the database gets the fixture's
+    // cases, a fixture repository is connected, one run is started and opened. `/eval-run-detail`
+    // only names the file. The start may be a 409 when another journey's run is active; either
+    // way the first completed row is opened.
+    route: '/eval-run-detail',
+    setup: grantAdminWithCases,
+    prepare: async (page) => {
+      const repository = REPOSITORY.fixture(uniqueToken())
+      await connectRepository(page, repository)
+      await expect(sourceRow(page, repository).getByText('Ready')).toBeVisible({ timeout: 30_000 })
+      await page.goto('/eval-run')
+      await startRun(page)
+      await expect(completedRun(page)).toBeVisible(COMPLETED)
+      await completedRun(page).click()
+      await expect(page).toHaveURL(/\/eval-run\/[^/]+$/)
+      await expect(page.getByRole('table', { name: 'Cases' })).toBeVisible()
+      return new URL(page.url()).pathname
+    },
+  },
   // The empty state before a search. The route is in the nav, so it is captured here signed in.
   { route: '/search' },
   {
