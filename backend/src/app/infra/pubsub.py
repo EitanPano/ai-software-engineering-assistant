@@ -162,9 +162,10 @@ def create_pubsub(
 # module.
 def _subscribers() -> Sequence[SubscriberEntry]:
     from app.infra.subscribers.execute_run import execute_run_on_created
+    from app.infra.subscribers.index_source import index_source_on_queued
     from app.infra.subscribers.send_welcome import send_welcome
 
-    return [send_welcome, execute_run_on_created]
+    return [send_welcome, execute_run_on_created, index_source_on_queued]
 
 
 pubsub: Final = create_pubsub(subscribers=_subscribers)

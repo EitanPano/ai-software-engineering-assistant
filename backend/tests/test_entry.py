@@ -22,6 +22,7 @@ PRODUCTION |= {
     "JWT_REFRESH_SECRET": f"{LONG_VALUE}-2",
     "OTP_SECRET": f"{LONG_VALUE}-3",
     "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4",
+    "VOYAGE_API_KEY": f"{LONG_VALUE}-5",
 }
 
 
@@ -184,6 +185,7 @@ class TestLoadEnv:
             "ENCRYPTION_KEY",
             "DATABASE_URL",
             "ANTHROPIC_API_KEY",
+            "VOYAGE_API_KEY",
         ]
         assert loaded.env.app_env == "development"
         assert loaded.env.port == 8000
@@ -199,7 +201,34 @@ class TestLoadEnv:
             "ENCRYPTION_KEY",
             "DATABASE_URL",
             "ANTHROPIC_API_KEY",
+            "VOYAGE_API_KEY",
         ]
+
+    def test_requires_the_voyage_key_in_production_and_refuses_the_development_default(
+        self,
+    ) -> None:
+        with pytest.raises(EnvError, match="VOYAGE_API_KEY"):
+            load_env({**PRODUCTION, "VOYAGE_API_KEY": ""})
+        with pytest.raises(EnvError, match="VOYAGE_API_KEY: is a placeholder"):
+            load_env({**PRODUCTION, "VOYAGE_API_KEY": "dev-only-voyage-key-not-real"})
+
+        assert load_env(PRODUCTION).env.voyage_api_key == f"{LONG_VALUE}-5"
+        assert load_env({}).env.voyage_api_key == "dev-only-voyage-key-not-real"
+
+    def test_refuses_the_github_and_voyage_base_urls_in_production_only(self) -> None:
+        """V06: both `*_BASE_URL` variables are refused in production."""
+        for name in ("GITHUB_BASE_URL", "VOYAGE_BASE_URL"):
+            url = {name: "http://127.0.0.1:8102"}
+
+            with pytest.raises(EnvError, match=f"{name}: is not allowed in production"):
+                load_env({**PRODUCTION, **url})
+            assert load_env(url).env is not None
+            assert load_env({**PRODUCTION, name: ""}).env.app_env == "production"
+
+        loaded = load_env({"GITHUB_BASE_URL": "http://127.0.0.1:8102"})
+        assert loaded.env.github_base_url == "http://127.0.0.1:8102"
+        assert loaded.env.voyage_base_url is None
+        assert load_env({}).env.github_base_url is None
 
     def test_requires_the_anthropic_key_in_production_and_refuses_the_development_default(
         self,
@@ -268,7 +297,7 @@ class TestLoadEnv:
         secrets = load_env({"APP_ENV": "development", "ENCRYPTION_KEY": ""}).defaulted_secrets
         expected = ["ENCRYPTION_KEY"]
         expected[:0] = ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OTP_SECRET"]
-        expected.extend(["DATABASE_URL", "ANTHROPIC_API_KEY"])
+        expected.extend(["DATABASE_URL", "ANTHROPIC_API_KEY", "VOYAGE_API_KEY"])
         assert secrets == expected
 
     def test_reads_the_port_and_refuses_one_that_is_not_a_port(self) -> None:

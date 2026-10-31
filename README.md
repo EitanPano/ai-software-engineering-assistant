@@ -16,7 +16,7 @@
 ## About
 
 An AI Software Engineering Assistant, built as a proper agent platform rather than a basic
-chatbot. Engineers connect GitHub repositories, ask the agent about that code and get answers
+chatbot. Admins connect GitHub repositories, engineers ask the agent about that code and get answers
 cited to file and line. Anything the agent wants to change on GitHub needs their approval.
 
 A typical AI chatbot does not know a team's codebase, forgets between chats, cannot show how
@@ -25,6 +25,7 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 ## Features
 
 - Multiple MCP servers: our own `knowledge` server and GitHub's official server (planned)
+- Knowledge sources: an admin connects a public GitHub repository, indexed by symbol and embedded
 - Hybrid RAG: semantic and keyword search over connected GitHub repositories (planned)
 - Agentic RAG: the agent decides when to retrieve more information (planned)
 - Persistent agent memory: conversation history distinct from long-term knowledge (planned)
@@ -104,6 +105,9 @@ docker compose --profile app up --build
 | `ANTHROPIC_API_KEY` | backend: Anthropic API key for the agent. Required in production; a fake default applies elsewhere, and tests and e2e run on a scripted fake. | — |
 | `LLM_MODEL` | backend: The model the agent runs on, without a date suffix. | `claude-opus-5-5` |
 | `ANTHROPIC_BASE_URL` | backend: Points the SDK at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
+| `VOYAGE_API_KEY` | backend: Voyage AI key for the code embeddings (voyage-code-4, paid per token). Required in production; a fake default applies elsewhere, and tests and e2e run on a scripted fake. | — |
+| `VOYAGE_BASE_URL` | backend: Points the Voyage client at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
+| `GITHUB_BASE_URL` | backend: Points the GitHub client at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
 | `DATABASE_URL` | backend: database/postgres provider Postgres connection URL. Required in production; outside production it defaults to the local service. Tests (testDb) use postgres://app:app@127.0.0.1:5432/app_test; override with TEST_DATABASE_URL. Browser tests (e2eDb) use postgres://app:app@127.0.0.1:5432/app_e2e; override with E2E_DATABASE_URL. | `postgres://app:app@127.0.0.1:5432/app` |
 <!-- configuration:end -->
 

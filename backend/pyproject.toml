@@ -14,6 +14,12 @@ dependencies = [
   "psycopg[binary,pool]>=3.3",
   "pydantic>=2.14",
   "pyjwt>=2.15",
+  # Code chunking by symbol (.doc/conventions.md); imported only by services/parse_worker.py, the
+  # parse child process (an import-linter contract enforces it).
+  "tree-sitter>=0.26",
+  "tree-sitter-javascript",
+  "tree-sitter-python",
+  "tree-sitter-typescript",
   "uvicorn>=0.54",
   "watchfiles>=1.1",
 ]
@@ -124,8 +130,11 @@ layers = [
 ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.send_welcome",
   "app.infra.pubsub -> app.infra.subscribers.execute_run",
-  # The boot sweep imports the run rule inside its function, after every resource is connected.
+  "app.infra.pubsub -> app.infra.subscribers.index_source",
+  # The boot sweeps import the run and source rules inside their functions, after every resource
+  # is connected.
   "app.infra.dependency -> app.api.run.controller",
+  "app.infra.dependency -> app.api.source.controller",
 ]
 
 # Leaves: models/ imports models/ only (not even pydantic: the wire shape is in a module's schema).
@@ -438,7 +447,10 @@ source_modules = [
 forbidden_modules = ["app.api"]
 allow_indirect_imports = true
 # The boot sweep (`sweep_lost_runs`) is the one place `dependency.py` reaches a module.
-ignore_imports = ["app.infra.dependency -> app.api.run.controller"]
+ignore_imports = [
+  "app.infra.dependency -> app.api.run.controller",
+  "app.infra.dependency -> app.api.source.controller",
+]
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
@@ -473,6 +485,57 @@ type = "forbidden"
 source_modules = ["app.infra.jobs", "app.infra.subscribers"]
 forbidden_modules = ["app.api.*.routes", "app.api.*.service", "app.api.*.model"]
 allow_indirect_imports = true
+
+# The parse worker is a child process that holds no secret: it imports nothing of the app, so
+# `config/env.py` is never loaded in it. Only it imports tree-sitter (a parse holds the GIL and
+# runs for as long as a crafted file makes it, so it never runs in the API process).
+[[tool.importlinter.contracts]]
+name = "the parse worker imports nothing of the app"
+type = "forbidden"
+source_modules = ["app.services.parse_worker"]
+forbidden_modules = [
+  "app.api",
+  "app.config",
+  "app.infra",
+  "app.middleware",
+  "app.models",
+  "app.server",
+  "app.main",
+  "app.openapi",
+  "app.services.anthropic",
+  "app.services.cache",
+  "app.services.chunk",
+  "app.services.communicate",
+  "app.services.db",
+  "app.services.event",
+  "app.services.github",
+  "app.services.logger",
+  "app.services.parse",
+  "app.services.security",
+  "app.services.session",
+  "app.services.tool",
+  "app.services.utils",
+  "app.services.voyage",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "only the parse worker imports tree-sitter"
+type = "forbidden"
+source_modules = ["app"]
+forbidden_modules = [
+  "tree_sitter",
+  "tree_sitter_javascript",
+  "tree_sitter_python",
+  "tree_sitter_typescript",
+]
+allow_indirect_imports = true
+ignore_imports = [
+  "app.services.parse_worker -> tree_sitter",
+  "app.services.parse_worker -> tree_sitter_javascript",
+  "app.services.parse_worker -> tree_sitter_python",
+  "app.services.parse_worker -> tree_sitter_typescript",
+]
 
 # What each file of a module may import.
 [[tool.importlinter.contracts]]
@@ -585,7 +648,9 @@ modules = ["app.api.*"]
 ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.send_welcome",
   "app.infra.pubsub -> app.infra.subscribers.execute_run",
+  "app.infra.pubsub -> app.infra.subscribers.index_source",
   "app.infra.dependency -> app.api.run.controller",
+  "app.infra.dependency -> app.api.source.controller",
   "app.api.*.controller -> app.api.*.controller",
   "app.api.*.controller -> app.api.*.schema",
   "app.api.*.schema -> app.api.*.schema",

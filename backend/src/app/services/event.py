@@ -14,8 +14,10 @@ from app.infra.pubsub import SubscriberEntry, Unsubscribe, pubsub
 
 __all__ = [
     "RUN_CREATED",
+    "SOURCE_QUEUED",
     "USER_REGISTERED",
     "RunCreated",
+    "SourceQueued",
     "Topic",
     "Unsubscribe",
     "UserRegistered",
@@ -48,6 +50,14 @@ class RunCreated(TypedDict):
 
 # Published by the conversation controller after a send; the agent executes the run.
 RUN_CREATED: Final = Topic[RunCreated]("run.created")
+
+
+class SourceQueued(TypedDict):
+    source_id: str
+
+
+# Published by the source controller after a connect or a retry; `index_source` indexes it.
+SOURCE_QUEUED: Final = Topic[SourceQueued]("source.queued")
 
 
 async def publish[P](topic: Topic[P], payload: P) -> None:

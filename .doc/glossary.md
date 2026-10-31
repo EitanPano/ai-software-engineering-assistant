@@ -26,6 +26,9 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | source | A connected GitHub repository at a ref | table `source`, route `/api/source`, module `source` |
 | document | One file from a source | table `document` |
 | chunk | A searchable slice of a document, with its line range, keyword index and embedding | table `chunk` |
+| symbol | A named definition, such as a function or class, that one chunk holds | column `chunk.symbol` |
+| parse worker | The child process that runs `tree-sitter` on repository files, with no secrets and a deadline | `services/parse_worker.py` |
+| fixture repository | The small repository the fakes serve, which tests and evals index | `tests/fixture_repository.py` |
 | hybrid search | Semantic and keyword search fused with reciprocal rank fusion (RRF) | module `search`, route `/api/search` |
 | memory | Long-term knowledge about a user, distinct from conversation history | table `memory`, route `/api/memory`, module `memory` |
 | eval case | One question with its expected chunks and expected answer | table `eval_case` |

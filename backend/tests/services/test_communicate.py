@@ -353,6 +353,7 @@ class TestProviderResolutionAtBoot:
                 "ENCRYPTION_KEY": base64.b64encode(bytes([7]) * 32).decode(),
                 "DATABASE_URL": DATABASE_URL,
                 "ANTHROPIC_API_KEY": "a-production-anthropic-key-of-some-length",
+                "VOYAGE_API_KEY": "a-production-voyage-key-of-some-length",
             }
         )
 

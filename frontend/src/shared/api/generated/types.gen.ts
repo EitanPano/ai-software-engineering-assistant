@@ -36,6 +36,14 @@ export type AuthTokens = {
 }
 
 /**
+ * ConnectSourceBody
+ */
+export type ConnectSourceBody = {
+  url: string
+  ref?: string
+}
+
+/**
  * Conversation
  */
 export type Conversation = {
@@ -421,6 +429,60 @@ export type SendMessageBody = {
 export type SentMessage = {
   message: Message
   run: Run
+}
+
+/**
+ * Source
+ */
+export type Source = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Url
+   */
+  url: string
+  /**
+   * Ref
+   */
+  ref: string
+  status: 'queued' | 'indexing' | 'ready' | 'failed'
+  errorCode:
+    | 'repository_unavailable'
+    | 'repository_too_large'
+    | 'embedding_unavailable'
+    | 'interrupted'
+    | 'internal'
+    | null
+  /**
+   * Indexedcommit
+   */
+  indexedCommit: string | null
+  /**
+   * Documentcount
+   */
+  documentCount: number
+  /**
+   * Chunkcount
+   */
+  chunkCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * SourcePage
+ */
+export type SourcePage = {
+  /**
+   * Items
+   */
+  items: Array<Source>
+  /**
+   * Nextcursor
+   */
+  nextCursor: string | null
 }
 
 /**
@@ -1164,3 +1226,150 @@ export type GetApiRunByIdEventResponses = {
 
 export type GetApiRunByIdEventResponse =
   GetApiRunByIdEventResponses[keyof GetApiRunByIdEventResponses]
+
+export type GetApiSourceData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Cursor
+     */
+    cursor?: string
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: '/api/source'
+}
+
+export type GetApiSourceErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiSourceError = GetApiSourceErrors[keyof GetApiSourceErrors]
+
+export type GetApiSourceResponses = {
+  /**
+   * A page of sources, newest first
+   */
+  200: SourcePage
+}
+
+export type GetApiSourceResponse = GetApiSourceResponses[keyof GetApiSourceResponses]
+
+export type PostApiSourceData = {
+  body?: ConnectSourceBody
+  path?: never
+  query?: never
+  url: '/api/source'
+}
+
+export type PostApiSourceErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+  /**
+   * Upstream unavailable
+   */
+  503: ErrorBody
+}
+
+export type PostApiSourceError = PostApiSourceErrors[keyof PostApiSourceErrors]
+
+export type PostApiSourceResponses = {
+  /**
+   * The connected source, queued for indexing
+   */
+  201: Source
+}
+
+export type PostApiSourceResponse = PostApiSourceResponses[keyof PostApiSourceResponses]
+
+export type PostApiSourceByIdIndexingData = {
+  body?: never
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/source/{id}/indexing'
+}
+
+export type PostApiSourceByIdIndexingErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type PostApiSourceByIdIndexingError =
+  PostApiSourceByIdIndexingErrors[keyof PostApiSourceByIdIndexingErrors]
+
+export type PostApiSourceByIdIndexingResponses = {
+  /**
+   * The failed source, queued again
+   */
+  202: Source
+}
+
+export type PostApiSourceByIdIndexingResponse =
+  PostApiSourceByIdIndexingResponses[keyof PostApiSourceByIdIndexingResponses]

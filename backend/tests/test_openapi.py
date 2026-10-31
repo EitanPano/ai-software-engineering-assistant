@@ -144,6 +144,8 @@ class TestTheDocument:
             "/api/conversation/{id}": {"get"},
             "/api/conversation/{id}/message": {"get", "post"},
             "/api/run/{id}/event": {"get"},
+            "/api/source": {"get", "post"},
+            "/api/source/{id}/indexing": {"post"},
         }
 
     def test_documents_the_user_list_query_and_its_page_component(self) -> None:
@@ -248,6 +250,9 @@ class TestTheShaping:
                 "MessagePage",
                 "SendMessageBody",
                 "SentMessage",
+                "Source",
+                "SourcePage",
+                "ConnectSourceBody",
             }
         )
 

@@ -4,7 +4,8 @@ import { Outlet, type RouteObject } from 'react-router'
 import { conversationListQuery, conversationQuery } from '@/entity/conversation/api/conversation'
 import { healthQuery } from '@/entity/health/api/health'
 import { messageListQuery } from '@/entity/message/api/message'
-import { redirectIfSignedIn, requireAccount, returnToOf } from '@/shared/auth/session'
+import { sourceListQuery } from '@/entity/source/api/source'
+import { redirectIfSignedIn, requireAccount, requireRole, returnToOf } from '@/shared/auth/session'
 
 import AuthError from './(auth)/error'
 import AuthLayout from './(auth)/layout'
@@ -20,6 +21,8 @@ import SiteLoading from './(site)/loading'
 import SiteNotFound from './(site)/not-found'
 import HomePage from './(site)/page'
 import ProfilePage from './(site)/profile/page'
+import ConnectSourcePage from './(site)/source/connect/page'
+import SourceListPage from './(site)/source/page'
 import RootError from './root-error'
 
 // The route table: paths to components and loaders, nothing else. A route group is a pathless
@@ -74,6 +77,29 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                     ])
                   },
                   Component: ConversationPage,
+                },
+                {
+                  // The admin group: its own loader is the gate, so a staff route added here is
+                  // guarded without its own call. Children still call requireRole, because
+                  // matched loaders run in parallel and a child's fetch must not outrun the
+                  // gate. The API checks again.
+                  loader: ({ request }) => requireRole(queryClient, 'admin', returnToOf(request)),
+                  children: [
+                    {
+                      path: 'source',
+                      loader: async ({ request }) => {
+                        await requireRole(queryClient, 'admin', returnToOf(request))
+                        return queryClient.infiniteQuery(sourceListQuery())
+                      },
+                      Component: SourceListPage,
+                    },
+                    {
+                      path: 'source/connect',
+                      loader: ({ request }) =>
+                        requireRole(queryClient, 'admin', returnToOf(request)),
+                      Component: ConnectSourcePage,
+                    },
+                  ],
                 },
                 { path: 'forbidden', Component: ForbiddenPage },
                 { path: '*', Component: SiteNotFound },

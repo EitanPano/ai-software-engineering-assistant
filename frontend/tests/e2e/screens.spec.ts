@@ -6,6 +6,7 @@ import { NAV } from '../../src/app/nav'
 
 import { fillSignIn, registerThroughUi, signOutThroughUi } from './auth-support'
 import { capturedRoutes } from './screen-routes'
+import { REPOSITORY, connectRepository, grantAdmin, sourceRow, uniqueToken } from './source-support'
 import { screenProblems } from './support'
 
 // True when E2E_BASE_URL points the suite at a running stack, whose database is not the browser-test
@@ -32,6 +33,24 @@ const SIGNED_IN_ROUTES: {
   { route: '/profile' },
   { route: '/forbidden' },
   { route: '/conversation' },
+  // The admin screens: each has its own account, promoted on the e2e database.
+  {
+    route: '/source',
+    setup: grantAdmin,
+    // A Ready and a Failed row (never released, so it keeps its reason and Retry), so the screen
+    // shows populated rows at every width instead of whatever other journeys left behind.
+    prepare: async (page) => {
+      const token = uniqueToken()
+      const ready = REPOSITORY.fixture(token)
+      const failed = REPOSITORY.embedFail(token)
+      await connectRepository(page, ready)
+      await expect(sourceRow(page, ready).getByText('Ready')).toBeVisible({ timeout: 30_000 })
+      await connectRepository(page, failed)
+      await expect(sourceRow(page, failed).getByText('Failed')).toBeVisible({ timeout: 30_000 })
+      return '/source'
+    },
+  },
+  { route: '/source/connect', setup: grantAdmin },
   {
     route: '/conversation-detail',
     // Needs no fake: starting a conversation calls no model.
@@ -122,7 +141,7 @@ const HASHED = { timeout: 15_000 } // the wait after a submit that hashes a pass
 const REGISTRATION_MS = HASHED.timeout
 const MARGIN_MS = 15_000
 const CAPTURE_MS = 10_000
-const PREPARE_MS = 10_000 // making a record through the UI before its capture
+const PREPARE_MS = 70_000 // making records through the UI before their capture (an index is polled every 3 s)
 
 for (const group of groups) {
   test(`signed-in ${group.map((entry) => entry.route).join(', ')}`, async ({ page }, info) => {

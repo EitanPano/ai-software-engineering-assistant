@@ -92,9 +92,10 @@ Planned; each task's migration creates its tables and the code wins on conflict.
 - `approval`: `tool_call`; decision, deciding `user`, reason.
 - `tool_policy`: `mcp_server`, tool name; effect (allow, ask, deny).
 - `mcp_server`: name, URL, enabled.
-- `source`: repository URL, ref, indexed commit, status.
-- `document`: `source`; path, content hash.
-- `chunk`: `document`; content, line range, keyword index, embedding.
+- `source`: repository URL, ref, status, error code, indexed commit, counts.
+- `document`: `source`; path, language.
+- `chunk`: `document`; symbol, line range, content, embedding. The search task adds its keyword
+  index.
 - `memory`: owner `user`; content, embedding, originating `conversation`.
 - `eval_case`: question, expected chunks, expected answer.
 - `eval_run`: scores per metric and per case.
@@ -154,11 +155,12 @@ None in the template. A vendor goes in `services/<vendor>` and is selected by
 | Service | Wrapped in | Configured by |
 | --- | --- | --- |
 | Anthropic API (`claude-opus-5-5`; the agent, memory extraction and the eval judge) | `services/anthropic` | `ANTHROPIC_API_KEY`, `LLM_MODEL`; `ANTHROPIC_BASE_URL` points tests at the fake and is refused in production |
-| Voyage AI embeddings (`voyage-code-4`) | `services/voyage` | `VOYAGE_API_KEY` |
+| Voyage AI embeddings (`voyage-code-4`) | `services/voyage` | `VOYAGE_API_KEY`; `VOYAGE_BASE_URL` for the fake, refused in production |
+| GitHub's public REST API, anonymous, 60 requests an hour per server address | `services/github` | `GITHUB_BASE_URL` for the fake, refused in production |
 | GitHub MCP server | the MCP client, as an `mcp_server` row | `GITHUB_TOKEN`, held by its Compose service |
 
-Tests and the e2e suite use a scripted fake for the first two, so `check` needs no key; only
-eval runs exercise the real model.
+Tests and the e2e suite use a scripted fake for Anthropic, Voyage and GitHub, so `check` needs no
+key; only eval runs exercise the real model.
 
 ## Operational Concerns
 
@@ -196,6 +198,12 @@ eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-31: sources. Routes `POST` and `GET /api/source` and `POST /api/source/{id}/indexing`,
+  admin only, and the screens `/source` and `/source/connect`. Tables `source`, `document` and
+  `chunk` (`0005-source.sql`). An index is a bus reaction that reads a public repository's tarball
+  without extracting it, and a boot sweep ends what a lost process left. Voyage and GitHub's public
+  API are new external dependencies. `tree-sitter` runs only in a child process with no secrets
+  and a deadline, because a parse holds the GIL and takes about quadratic time on crafted input.
 - 2026-10-30: the `database` service moves to Postgres 18 with `pgvector` on a new volume, and
   `0004-vector-extension.sql` enables `vector`. `grant_admin`, a shell command, makes the first
   admin: it takes the account's password and ends its sessions, because `register` takes any

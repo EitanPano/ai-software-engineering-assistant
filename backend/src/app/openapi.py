@@ -61,6 +61,9 @@ COMPONENTS: Final = frozenset(
         "MessagePage",
         "SendMessageBody",
         "SentMessage",
+        "Source",
+        "SourcePage",
+        "ConnectSourceBody",
     }
 )
 

@@ -13,6 +13,7 @@ import pytest
 from app.infra.loop import selector_loop_factory
 from app.server import app
 from tests.agent_support import fake_model as fake_model  # the scripted model, for any suite
+from tests.source_support import fakes as fakes  # the scripted GitHub and Voyage, for any suite
 from tests.support import http_client
 
 

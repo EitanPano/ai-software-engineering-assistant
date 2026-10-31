@@ -196,8 +196,8 @@ returnTo?)` throws a redirect to `/sign-in?next=…`; `requireRole(queryClient, 
   in in the query cache and the hint; the form navigates to a safe `next` path (`safeNextPath`
   accepts only a path on this site). Sign-out clears the cache and the hint whatever the API said.
 - **Staff pages.** Put them under a pathless route whose loader calls `requireRole(queryClient,
-'admin')`, and give every staff loader the same call. The template ships no staff page: no
-  route creates an admin yet.
+'admin')`, and give every staff loader the same call. `/source` and `/source/connect` are the
+  staff pages; the first admin is made with the server's `grant_admin` script.
 - **Renaming the roles.** The template's roles are `user` and `admin`. A product that renames them
   changes the role type guard in `shared/auth/session.ts` (it accepts only those two values, so
   an account with another role reads as signed out), every `requireRole(...)` call, the role-gated layout
@@ -320,6 +320,21 @@ tests.fake_anthropic` from `backend/` on port 8101, before the API, and points t
   the message it sends (`tests/e2e/conversation-support.ts` names them), so parallel journeys stay
   apart. A Compose stack has no fake: `conversation.spec.ts` registers nothing when `E2E_BASE_URL`
   is set, and `screens.spec.ts` captures only screens that call no model.
+- **The GitHub and Voyage fakes.** `playwright.config.ts` also starts `python -m tests.fake_github`
+  (port 8102) and `python -m tests.fake_voyage` (port 8103) from `backend/`, before the API, and
+  points the API at them (`GITHUB_BASE_URL`, `VOYAGE_BASE_URL`, a placeholder `VOYAGE_API_KEY`).
+  The fake GitHub serves the fixture repository for any `<owner>/<repo>` and picks a script by the
+  repository name (`tests/e2e/source-support.ts › REPOSITORY`: `missing-<token>`, `embedfail-<key>`);
+  `source.spec.ts` registers nothing under `E2E_BASE_URL`.
+- **The staff group.** `/source` and `/source/connect` sit in a pathless admin group in
+  `routes.tsx`, each loader calling `requireRole(queryClient, 'admin')`. Their e2e accounts are
+  promoted by `grantAdmin` (`tests/e2e/source-support.ts`), which runs the server's `grant_admin`
+  script through `execFileSync` with the password on stdin and `account.databaseUrl` as
+  `DATABASE_URL`; it ends the account's sessions, so every admin journey (`signInAsAdmin`) signs
+  out and in again through the UI.
+- **A role on a nav entry.** `NavEntry.role` (optional) limits an entry in `app/nav.ts` to accounts
+  with that role; `(site)/layout.tsx` filters the table through `useCurrentUser`. It is cosmetic:
+  the route's loader and the API enforce the role.
 - **Streams.** `entity/run/api/run.ts` (`streamRun`) owns the SSE reconnection: the generated
   client runs one connection at a time (`sseMaxRetryAttempts: 1`) and the loop reopens with
   `Last-Event-ID`, bounded on consecutive connections that bring nothing new. `entity/run/model.ts`

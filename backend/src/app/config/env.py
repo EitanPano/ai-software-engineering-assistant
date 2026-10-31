@@ -51,11 +51,13 @@ _SECRET_NAMES: Final = (
     "ENCRYPTION_KEY",
     "DATABASE_URL",
     "ANTHROPIC_API_KEY",
+    "VOYAGE_API_KEY",
 )
 
 _DEVELOPMENT_DEFAULTS: Final = {
     # Not a real key and not shaped like one: development and every test run on the scripted fake.
     "ANTHROPIC_API_KEY": "dev-only-anthropic-key-not-real",
+    "VOYAGE_API_KEY": "dev-only-voyage-key-not-real",
     "JWT_ACCESS_SECRET": "dev-only-access-secret-change-me-0123456789",
     "JWT_REFRESH_SECRET": "dev-only-refresh-secret-change-me-012345678",
     "OTP_SECRET": "dev-only-otp-secret-change-me-0123456789abc",
@@ -73,6 +75,8 @@ _BLANK_IS_UNSET: Final = (
     "STATIC_DIR",
     "TRUST_PROXY",
     "ANTHROPIC_BASE_URL",
+    "VOYAGE_BASE_URL",
+    "GITHUB_BASE_URL",
 )
 
 _MIN_SECRET_LENGTH: Final = 32
@@ -194,6 +198,12 @@ class Env(BaseModel):
     llm_model: Annotated[str, Field(min_length=1)] = "claude-opus-5-5"
     # Points the SDK at another server: the scripted fake in tests and e2e. Refused in production.
     anthropic_base_url: Annotated[str, Field(min_length=1)] | None = None
+    # Embeds the code chunks (`services/voyage.py`); paid per token.
+    voyage_api_key: Annotated[str, Field(min_length=1)]
+    # Point the Voyage and GitHub clients at the scripted fakes in tests and e2e. Refused in
+    # production.
+    voyage_base_url: Annotated[str, Field(min_length=1)] | None = None
+    github_base_url: Annotated[str, Field(min_length=1)] | None = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +266,10 @@ def load_env(source: Mapping[str, str]) -> LoadedEnv:
         )
     if production and parsed.anthropic_base_url:
         raise EnvError("invalid environment: ANTHROPIC_BASE_URL: is not allowed in production")
+    if production and parsed.voyage_base_url:
+        raise EnvError("invalid environment: VOYAGE_BASE_URL: is not allowed in production")
+    if production and parsed.github_base_url:
+        raise EnvError("invalid environment: GITHUB_BASE_URL: is not allowed in production")
     if production and parsed.static_dir and not (parsed.static_dir / "index.html").is_file():
         raise EnvError(f"invalid environment: STATIC_DIR: {parsed.static_dir} has no index.html")
     return LoadedEnv(env=parsed, defaulted_secrets=defaulted)

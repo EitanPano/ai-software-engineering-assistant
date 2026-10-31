@@ -9,6 +9,7 @@ import {
   getApiConversationByIdMessage,
   getApiHealth,
   getApiHealthReady,
+  getApiSource,
   getApiUser,
   getApiUserById,
   getApiUserMe,
@@ -22,6 +23,8 @@ import {
   postApiAuthRegister,
   postApiConversation,
   postApiConversationByIdMessage,
+  postApiSource,
+  postApiSourceByIdIndexing,
 } from '../sdk.gen'
 import type {
   GetApiConversationByIdData,
@@ -39,6 +42,9 @@ import type {
   GetApiHealthReadyError,
   GetApiHealthReadyResponse,
   GetApiHealthResponse,
+  GetApiSourceData,
+  GetApiSourceError,
+  GetApiSourceResponse,
   GetApiUserByIdData,
   GetApiUserByIdError,
   GetApiUserByIdResponse,
@@ -75,6 +81,12 @@ import type {
   PostApiConversationData,
   PostApiConversationError,
   PostApiConversationResponse,
+  PostApiSourceByIdIndexingData,
+  PostApiSourceByIdIndexingError,
+  PostApiSourceByIdIndexingResponse,
+  PostApiSourceData,
+  PostApiSourceError,
+  PostApiSourceResponse,
 } from '../types.gen'
 
 export type QueryKey<TOptions extends Options> = [
@@ -544,6 +556,81 @@ export const postApiConversationByIdMessageMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await postApiConversationByIdMessage({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getApiSourceQueryKey = (options?: Options<GetApiSourceData>) =>
+  createQueryKey('getApiSource', options)
+
+/**
+ * List sources (admin)
+ */
+export const getApiSourceOptions = (options?: Options<GetApiSourceData>) =>
+  queryOptions<
+    GetApiSourceResponse,
+    GetApiSourceError,
+    GetApiSourceResponse,
+    ReturnType<typeof getApiSourceQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiSource({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiSourceQueryKey(options),
+  })
+
+/**
+ * Connect a GitHub repository (admin)
+ */
+export const postApiSourceMutation = (
+  options?: Partial<Options<PostApiSourceData>>,
+): UseMutationOptions<PostApiSourceResponse, PostApiSourceError, Options<PostApiSourceData>> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiSourceResponse,
+    PostApiSourceError,
+    Options<PostApiSourceData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postApiSource({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Retry indexing a failed source (admin)
+ */
+export const postApiSourceByIdIndexingMutation = (
+  options?: Partial<Options<PostApiSourceByIdIndexingData>>,
+): UseMutationOptions<
+  PostApiSourceByIdIndexingResponse,
+  PostApiSourceByIdIndexingError,
+  Options<PostApiSourceByIdIndexingData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiSourceByIdIndexingResponse,
+    PostApiSourceByIdIndexingError,
+    Options<PostApiSourceByIdIndexingData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postApiSourceByIdIndexing({
         ...options,
         ...fnOptions,
         throwOnError: true,

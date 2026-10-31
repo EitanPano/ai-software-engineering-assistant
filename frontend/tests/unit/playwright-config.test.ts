@@ -35,6 +35,30 @@ describe('playwright.config.ts', () => {
     expect(api?.env?.ANTHROPIC_API_KEY).not.toMatch(/^sk-ant-/)
   })
 
+  it('starts the GitHub and Voyage fakes before the API and points the API at them', async () => {
+    const config = await load({ E2E_BASE_URL: '', E2E_DATABASE_URL: 'postgres://u:p@h/app_e2e' })
+    const servers = [config.webServer ?? []].flat()
+    const github = servers.find((server) => server.command.includes('tests.fake_github'))
+    const voyage = servers.find((server) => server.command.includes('tests.fake_voyage'))
+    const api = servers.find((server) => server.command.includes('app.main'))
+
+    expect(github?.url).toBe('http://127.0.0.1:8102/health')
+    expect(voyage?.url).toBe('http://127.0.0.1:8103/health')
+    expect(github?.reuseExistingServer).toBe(false)
+    expect(voyage?.reuseExistingServer).toBe(false)
+    expect(servers.indexOf(github as (typeof servers)[number])).toBeLessThan(
+      servers.indexOf(api as (typeof servers)[number]),
+    )
+    expect(servers.indexOf(voyage as (typeof servers)[number])).toBeLessThan(
+      servers.indexOf(api as (typeof servers)[number]),
+    )
+    expect(api?.env?.GITHUB_BASE_URL).toBe('http://127.0.0.1:8102')
+    expect(api?.env?.VOYAGE_BASE_URL).toBe('http://127.0.0.1:8103')
+    // A placeholder the fake never checks, not shaped like a real key.
+    expect(api?.env?.VOYAGE_API_KEY).toBeTruthy()
+    expect(api?.env?.VOYAGE_API_KEY).not.toMatch(/^pa-/)
+  })
+
   it('keeps an explicit E2E_BASE_URL and starts nothing', async () => {
     const config = await load({ E2E_BASE_URL: 'http://127.0.0.1:3000' })
 

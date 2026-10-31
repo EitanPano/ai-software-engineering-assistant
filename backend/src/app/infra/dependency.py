@@ -176,6 +176,22 @@ async def sweep_lost_runs(*, logger: Logger = log) -> None:
         logger.error("lost run sweep failed", {"step": "sweep_lost_runs"}, error)
 
 
+async def sweep_lost_sources(*, logger: Logger = log) -> None:
+    """Ends the sources a previous process left `queued` or `indexing`, once, beside
+    `sweep_lost_runs` and for the same reason: with one replica an active source that started
+    before this process booted belongs to a process that is gone. Each ends `failed` as
+    `interrupted`, and its retry action works. A failed sweep is logged and the boot continues.
+
+    Imported inside the function, like the run sweep: the module is above `infra` in the layer map.
+    """
+    from app.api.source.controller import fail_lost_sources
+
+    try:
+        await fail_lost_sources(clock.now())
+    except Exception as error:
+        logger.error("lost source sweep failed", {"step": "sweep_lost_sources"}, error)
+
+
 def resource_lifespan(
     resources: Sequence[Resource] | None = None,
     *,

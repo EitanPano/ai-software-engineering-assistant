@@ -18,6 +18,22 @@ export const zAuthTokens = z.object({
 })
 
 /**
+ * ConnectSourceBody
+ */
+export const zConnectSourceBody = z.object({
+  url: z
+    .string()
+    .max(159)
+    .regex(/^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/),
+  ref: z
+    .string()
+    .min(1)
+    .max(255)
+    .regex(/^[A-Za-z0-9._][A-Za-z0-9._\/-]*$/)
+    .optional(),
+})
+
+/**
  * Conversation
  */
 export const zConversation = z.object({
@@ -285,6 +301,38 @@ export const zSentMessage = z.object({
 })
 
 /**
+ * Source
+ */
+export const zSource = z.object({
+  id: z.string(),
+  url: z.string(),
+  ref: z.string(),
+  status: z.enum(['queued', 'indexing', 'ready', 'failed']),
+  errorCode: z
+    .enum([
+      'repository_unavailable',
+      'repository_too_large',
+      'embedding_unavailable',
+      'interrupted',
+      'internal',
+    ])
+    .nullable(),
+  indexedCommit: z.string().nullable(),
+  documentCount: z.int(),
+  chunkCount: z.int(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+})
+
+/**
+ * SourcePage
+ */
+export const zSourcePage = z.object({
+  items: z.array(zSource),
+  nextCursor: z.string().nullable(),
+})
+
+/**
  * UpdateMeBody
  */
 export const zUpdateMeBody = z.object({
@@ -446,3 +494,29 @@ export const zGetApiRunByIdEventPath = z.object({
  * The run's events as server-sent events; each `id` is the sequence
  */
 export const zGetApiRunByIdEventResponse = zRunEvent
+
+export const zGetApiSourceQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.int().gte(1).lte(100).optional().default(20),
+})
+
+/**
+ * A page of sources, newest first
+ */
+export const zGetApiSourceResponse = zSourcePage
+
+export const zPostApiSourceBody = zConnectSourceBody
+
+/**
+ * The connected source, queued for indexing
+ */
+export const zPostApiSourceResponse = zSource
+
+export const zPostApiSourceByIdIndexingPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The failed source, queued again
+ */
+export const zPostApiSourceByIdIndexingResponse = zSource

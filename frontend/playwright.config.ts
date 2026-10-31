@@ -18,6 +18,8 @@ const databaseUrl = external
   : e2eDatabaseUrl(process.env.E2E_DATABASE_URL, 'postgres://app:app@127.0.0.1:5432/app_e2e')
 
 const FAKE_PORT = 8101
+const GITHUB_FAKE_PORT = 8102
+const VOYAGE_FAKE_PORT = 8103
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -57,6 +59,24 @@ export default defineConfig({
           timeout: 120_000,
         },
         {
+          // The GitHub fake (backend/tests/fake_github.py): the fixture repository as a tarball
+          // behind a 302, the repository name picking the script. Listens before the API.
+          command: 'uv run python -m tests.fake_github',
+          cwd: '../backend',
+          url: `http://127.0.0.1:${GITHUB_FAKE_PORT}/health`,
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
+        {
+          // The Voyage fake (backend/tests/fake_voyage.py): deterministic unit vectors, and a
+          // marker that fails the call until released.
+          command: 'uv run python -m tests.fake_voyage',
+          cwd: '../backend',
+          url: `http://127.0.0.1:${VOYAGE_FAKE_PORT}/health`,
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
+        {
           // A fresh API every run (never a leftover one with someone's data), with its limits
           // scaled so the suite does not trip them. Playwright starts web servers before its
           // global setup, so the browser-test database is prepared in the same command, before
@@ -72,6 +92,9 @@ export default defineConfig({
             // shaped like a real one).
             ANTHROPIC_BASE_URL: `http://127.0.0.1:${FAKE_PORT}`,
             ANTHROPIC_API_KEY: 'e2e-placeholder-not-a-key',
+            GITHUB_BASE_URL: `http://127.0.0.1:${GITHUB_FAKE_PORT}`,
+            VOYAGE_BASE_URL: `http://127.0.0.1:${VOYAGE_FAKE_PORT}`,
+            VOYAGE_API_KEY: 'e2e-placeholder-not-a-key',
             E2E_DATABASE_URL: databaseUrl,
             DATABASE_URL: databaseUrl,
           },

@@ -79,20 +79,22 @@ src/app/
   api/<name>/         routes · controller · schema; service only when the module has data
                       (model.py: reserved, for an engine that defines storage in code)
                       (health, auth, user; conversation: the reference to copy; run: the
-                      agent's runs; agent: the loop, a controller only)
+                      agent's runs; agent: the loop, a controller only; source: connected
+                      repositories and their index)
   models/<name>/      interface · type · enums · constants (auth, session, user,
-                      conversation, run)
+                      conversation, run, source)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
                       asgi (helpers the ASGI middleware share)
                       rate_limit · auth · role (the gates)
-  services/           logger.py · db.py · cache.py · session.py · event.py · anthropic.py · tool.py
+  services/           logger.py · db.py · cache.py · session.py · event.py · anthropic.py · tool.py ·
+                      github.py · voyage.py · chunk.py · parse.py · parse_worker.py
     security/         crypto · jwt · cookies · otp
     communicate/      __init__.py · console · mail · sms · whatsapp · templates/
     utils/            error · openapi · clock · api_model · pagination · postgres_error (pure, no I/O)
   infra/              dependency.py · loop.py · memory.py · postgres.py · pubsub.py · scheduler.py
     jobs/             one file per background job: session_cleanup
-    subscribers/      one file per event reaction: send_welcome, execute_run
+    subscribers/      one file per event reaction: send_welcome, execute_run, index_source
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
     scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin); seed is reserved
 tests/                mirrors src/app/ (a package throughout, so two test_x.py cannot clash)
@@ -271,6 +273,8 @@ or infra file joins the list.
 | `main imports config env, infra dependency, logger and server only` | `main.py` stays an entry |
 | `nothing imports the entry` | nothing imports `main.py` |
 | `only the entry imports the server (openapi does, to write the contract)` | only `main.py`, tests and `openapi.py` import `server.py` |
+| `the parse worker imports nothing of the app` | `services/parse_worker.py` imports no module of the app, so `config/env.py` and every secret stay out of the child |
+| `only the parse worker imports tree-sitter` | `tree_sitter` and its grammars are imported by `services/parse_worker.py` alone |
 
 Module privacy is one point stricter than a type-aware linter: import-linter cannot tell a
 type-only import, so a module's `routes`, `service` and `model` never import another module's
@@ -390,6 +394,71 @@ changes only by plan.
 - Tests run on `tests/fake_anthropic.py`, a scripted fake of `POST /v1/messages` (markers in the
   user's message pick the script; `python -m tests.fake_anthropic` serves it on 8101 for e2e, and
   `ANTHROPIC_BASE_URL` points the API at it). `tests/agent_support.py` reaches it in process.
+
+## The source index
+
+- Endpoints, all admin-only (`require_role(UserRole.admin)`, rechecked in each handler):
+  `POST /api/source` (connect `https://github.com/<owner>/<repo>` at a ref; 201 `queued`),
+  `GET /api/source` (newest first) and `POST /api/source/{id}/indexing` (retry a `failed` source; 202).
+  Only public repositories, read anonymously: no GitHub token exists in this process, by
+  `.doc/conventions.md`. The URL and `ref` shapes are the schema's (`models/source/constants.py`).
+- Connect asks GitHub twice (`services/github.py`: the repository in its own spelling and default
+  branch, then the commit the ref names) and publishes `source.queued`;
+  `infra/subscribers/index_source.py` calls `api/source/controller.py › index_source`, the same
+  shape as `execute_run`. `index_source` claims the `queued` row, clears an earlier attempt,
+  streams the tarball to a spooled file under its cap, then on a worker thread reads it
+  (`read_archive`: regular text files only; skipped directories, suffixes, binaries, non-UTF-8,
+  oversized files; link, device and traversal members store nothing; every decompressed byte is
+  counted, skipped members included) and chunks it (`services/chunk.py`, pure), then embeds
+  (`services/voyage.py`) and commits batch by batch. It ends `ready` or `failed` on every exit,
+  `interrupted` on a cancellation, and a failed index leaves no document. `sweep_lost_sources`
+  (`infra/dependency.py`, called by `main.py`'s lifespan beside `sweep_lost_runs`) ends sources a
+  lost process left active as `interrupted`. The caps are `INDEX_CAPS` in `config/constants.py`;
+  a repository over one fails whole as `repository_too_large`. They bound the archive, every
+  member (`members`: tarfile runs with `stream=True` so it keeps none), what it unpacks to, the
+  documents, the text, and, because the input caps do not bound what chunking produces, the
+  `chunks` and `embedded_chars` counted in `_prepare` before anything is embedded. A window
+  advances by at least half its length, which keeps the embedded text at 2.0 times the input on
+  uniform lines and 3.28 at the worst pattern measured; the caps, not the ratio, bound the cost.
+  A commit is looked up with `application/vnd.github.sha`, so GitHub answers the
+  40 characters and not the commit and its diff.
+- A fallback to line windows is never silent: `ParseSession.summary()` counts overruns, crashes
+  (a reply that is not exactly `[name, start, end]` with integer lines inside the document counts
+  as one, and so does a worker `internal` error, which is also logged with its class), files the
+  budget skipped and, apart from those faults, files the grammar could not parse
+  (`syntaxErrors`); `index_source` logs the counts (`parse fell back`, no path) when the index
+  ends. The reply is untrusted end to end: a line is read to at most `MAX_REPLY_BYTES`, a nested
+  or malformed one is a crash for that file, a symbol name over `SYMBOL_NAME_MAX` (256) is
+  dropped and the symbol keeps its lines, and a name holding NUL or a lone surrogate is a crash.
+  Do not read `.row` or `.column` of a `tree_sitter.Point`: in
+  0.26.0 they corrupt memory from 257 upward; index (`point[0]`) or unpack it.
+- The parse worker. tree-sitter holds the GIL for a whole parse, cannot be interrupted, and its
+  time grows about with the square of a crafted file's size (64 KiB of `"'` as TypeScript takes
+  about 10 s), so it never runs in the API process. `services/parse_worker.py` is its only
+  importer, a child started by `services/parse.py` with `subprocess.Popen([sys.executable, "-I",
+  "-X", "utf8", "-m", "app.services.parse_worker"])` and a minimal environment (no secret; it
+  imports nothing of the app, and import-linter enforces both that and that nothing else imports
+  `tree_sitter`). Not `multiprocessing` (its spawn re-imports `app.main`, and a fork inherits the
+  secrets) and not asyncio's subprocesses (the selector loop cannot run them on Windows). One JSON
+  line per file over its pipes; a reader thread is the only way to wait on a pipe with a deadline
+  on Windows. A `ParseSession` is one index's parser: 2 s a file and 60 s an index
+  (`PARSE_LIMITS`, charged as wall time including every start); an overrun or a crash kills and
+  restarts the child and that file falls back to line windows, a spent budget sends the rest
+  there. `close()` ends the child on every exit path (the controller's `finally`, on a worker
+  thread because ending a child can wait; the cancellation handler directly; the context
+  manager). A virtual
+  environment's `python.exe` on Windows is a launcher that starts the real interpreter as its
+  child, so the worker reports its pid and `kill()` ends both. Isolation, not a sandbox: the child
+  runs as the same user.
+- `VOYAGE_API_KEY` (a secret), `VOYAGE_BASE_URL` and `GITHUB_BASE_URL` (refused in production; they
+  point the clients at the fakes).
+- Tests run on `tests/fake_github.py` (port 8102) and `tests/fake_voyage.py` (port 8103): scripted
+  fakes of the two wire formats, both answering `GET /health`, and `tests/fixture_repository.py`,
+  the fixture repository and the hostile tarball builders. The repository name picks the script
+  (`missing-<token>` is a 404, `embedfail-<key>` fails Voyage until `POST /release/<key>`, see the
+  fake's docstring). `tests/source_support.py` points the clients at them in process (the `fakes`
+  fixture) and mints admin and user tokens without an account. `python -m tests.fake_github` and
+  `python -m tests.fake_voyage` serve them for e2e. No network and no key.
 
 ## The engine seam
 

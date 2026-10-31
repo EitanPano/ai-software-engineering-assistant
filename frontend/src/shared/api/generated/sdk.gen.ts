@@ -29,6 +29,9 @@ import type {
   GetApiRunByIdEventErrors,
   GetApiRunByIdEventResponse,
   GetApiRunByIdEventResponses,
+  GetApiSourceData,
+  GetApiSourceErrors,
+  GetApiSourceResponses,
   GetApiUserByIdData,
   GetApiUserByIdErrors,
   GetApiUserByIdResponses,
@@ -65,6 +68,12 @@ import type {
   PostApiConversationData,
   PostApiConversationErrors,
   PostApiConversationResponses,
+  PostApiSourceByIdIndexingData,
+  PostApiSourceByIdIndexingErrors,
+  PostApiSourceByIdIndexingResponses,
+  PostApiSourceData,
+  PostApiSourceErrors,
+  PostApiSourceResponses,
 } from './types.gen'
 
 export type Options<
@@ -354,3 +363,45 @@ export const getApiRunByIdEvent = <ThrowOnError extends boolean = false>(
     GetApiRunByIdEventErrors,
     ThrowOnError
   >({ url: '/api/run/{id}/event', ...options })
+
+/**
+ * List sources (admin)
+ */
+export const getApiSource = <ThrowOnError extends boolean = false>(
+  options?: Options<GetApiSourceData, ThrowOnError>,
+): RequestResult<GetApiSourceResponses, GetApiSourceErrors, ThrowOnError> =>
+  (options?.client ?? client).get<GetApiSourceResponses, GetApiSourceErrors, ThrowOnError>({
+    url: '/api/source',
+    ...options,
+  })
+
+/**
+ * Connect a GitHub repository (admin)
+ */
+export const postApiSource = <ThrowOnError extends boolean = false>(
+  options?: Options<PostApiSourceData, ThrowOnError>,
+): RequestResult<PostApiSourceResponses, PostApiSourceErrors, ThrowOnError> =>
+  (options?.client ?? client).post<PostApiSourceResponses, PostApiSourceErrors, ThrowOnError>({
+    url: '/api/source',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  })
+
+/**
+ * Retry indexing a failed source (admin)
+ */
+export const postApiSourceByIdIndexing = <ThrowOnError extends boolean = false>(
+  options: Options<PostApiSourceByIdIndexingData, ThrowOnError>,
+): RequestResult<
+  PostApiSourceByIdIndexingResponses,
+  PostApiSourceByIdIndexingErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    PostApiSourceByIdIndexingResponses,
+    PostApiSourceByIdIndexingErrors,
+    ThrowOnError
+  >({ url: '/api/source/{id}/indexing', ...options })

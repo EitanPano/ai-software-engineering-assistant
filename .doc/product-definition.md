@@ -7,7 +7,7 @@ holds a marker. Delete a marker only by replacing it with a decision.
 ## Purpose
 
 An AI Software Engineering Assistant, built as a proper agent platform rather than a basic
-chatbot. Engineers connect GitHub repositories, ask the agent about that code and get answers
+chatbot. Admins connect GitHub repositories, engineers ask the agent about that code and get answers
 cited to file and line. Anything the agent wants to change on GitHub needs their approval.
 
 ## Problem Statement

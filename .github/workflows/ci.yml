@@ -67,7 +67,7 @@ jobs:
         env:
           DATABASE_URL: postgres://app:app@database:5432/app
         run: |
-          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET OTP_SECRET ENCRYPTION_KEY ANTHROPIC_API_KEY; do
+          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET OTP_SECRET ENCRYPTION_KEY ANTHROPIC_API_KEY VOYAGE_API_KEY; do
             export "$name=$(openssl rand -base64 32)"
           done
           docker compose --profile app up --build --wait --wait-timeout 120

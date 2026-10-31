@@ -94,3 +94,100 @@ class CookieSettings[T]:
 COOKIE_NAMES: Final = CookieSettings(access="access_token", refresh="refresh_token")
 COOKIE_PATHS: Final = CookieSettings(access="/", refresh="/api/auth")
 BEARER_PREFIX: Final = "Bearer "
+
+
+@dataclass(frozen=True)
+class IndexCaps:
+    """What bounds one index. A repository over a cap fails whole as `repository_too_large`, never
+    indexed in part. The input caps do not bound what chunking produces, so `chunks` and
+    `embedded_chars` do, and they, not any ratio, bound the cost: at most 64 MiB is embedded, which
+    is about 20 million tokens, about $2.40 at $0.12 per million, and a retry pays it again. The
+    ratio of embedded to input text is 2.0 on uniform lines and 3.28 at the worst pattern measured
+    (24 short lines then three of 2,900 characters), so such a repository fails at about 19.5 MiB
+    of text instead of 32."""
+
+    text_bytes: int
+    documents: int
+    file_bytes: int
+    archive_bytes: int
+    # Counted across skipped members too: skipping one still decompresses it.
+    unpacked_bytes: int
+    # Every member of the archive, whatever it is. Memory does not need it (tarfile keeps no
+    # member, `stream=True`); time does: an archive of millions of empty members costs only 512
+    # bytes of the unpacked cap each, and every one is read and checked.
+    members: int
+    # What chunking produces, counted as the drafts accumulate and before anything is embedded.
+    chunks: int
+    embedded_chars: int
+
+
+@dataclass(frozen=True)
+class ParseLimits:
+    """The parse worker's budget. A parse holds the GIL and grows about with the square of a
+    crafted file's size, so it runs in a child process and an overrun kills the child. The file
+    then goes to line windows."""
+
+    file_seconds: float
+    index_seconds: float
+
+
+@dataclass(frozen=True)
+class ChunkBounds:
+    """A chunk is under `max_chars`; line windows overlap by `overlap_lines`."""
+
+    max_chars: int
+    window_lines: int
+    overlap_lines: int
+
+
+@dataclass(frozen=True)
+class EmbeddingSettings:
+    model: str
+    dimension: int
+    # Voyage accepts 1000 texts a request and publishes no per-request token limit for
+    # voyage-code-4, so a batch also stays under voyage-code-3's 120,000 tokens.
+    batch_texts: int
+    batch_tokens: int
+    commit_chunks: int
+
+
+INDEX_CAPS: Final = IndexCaps(
+    text_bytes=32 * 1024 * 1024,
+    documents=5000,
+    file_bytes=1024 * 1024,
+    archive_bytes=256 * 1024 * 1024,
+    unpacked_bytes=1024 * 1024 * 1024,
+    members=200_000,
+    chunks=100_000,
+    embedded_chars=64 * 1024 * 1024,
+)
+PARSE_LIMITS: Final = ParseLimits(file_seconds=2.0, index_seconds=60.0)
+CHUNK_BOUNDS: Final = ChunkBounds(max_chars=6000, window_lines=60, overlap_lines=10)
+# A symbol's name is copied onto every chunk of it and no content cap counts it, so the parse
+# client keeps a name no longer than this and drops a longer one (the symbol keeps its lines).
+SYMBOL_NAME_MAX: Final = 256
+EMBEDDING: Final = EmbeddingSettings(
+    model="voyage-code-4",
+    dimension=1024,
+    batch_texts=128,
+    batch_tokens=100_000,
+    commit_chunks=512,
+)
+# Directories and suffixes the index skips: not source text.
+SKIPPED_DIRECTORIES: Final = frozenset(
+    {".git", "node_modules", "vendor", "dist", "build", "target", "__pycache__", ".venv", "venv"}
+)
+SKIPPED_SUFFIXES: Final = frozenset(
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".pdf", ".zip", ".gz", ".tar",
+        ".tgz", ".jar", ".class", ".so", ".dll", ".exe", ".bin", ".woff", ".woff2", ".ttf", ".eot",
+        ".mp3", ".mp4", ".mov", ".wasm", ".lock", ".min.js", ".map",
+    }
+)  # fmt: skip
+# Generated files named exactly, at any depth: lockfiles up to the file cap that would be embedded
+# at cost and crowd out the code in search.
+SKIPPED_FILE_NAMES: Final = frozenset(
+    {"package-lock.json", "pnpm-lock.yaml", "npm-shrinkwrap.json"}
+)
+# The GitHub hosts a redirect from the API may point at.
+ARCHIVE_REDIRECT_HOST: Final = "codeload.github.com"

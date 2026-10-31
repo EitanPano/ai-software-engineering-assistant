@@ -17,13 +17,18 @@ export async function expectNoSeriousViolations(page: Page) {
 // before it. A transition that is retargeted or whose element is removed is cancelled, and a
 // cancelled animation's `finished` rejects, so each batch is awaited with `allSettled`; the
 // replacement transition is a new animation, so it loops until none is left. Playwright's test
-// timeout bounds it.
+// timeout bounds it. Only a running animation is awaited: one that finished with `fill: forwards`
+// or `both` stays in `getAnimations()` for good, so waiting on "any finite animation" never ends.
 export async function settled(locator: Locator) {
   await locator.evaluate(async (element) => {
     const pending = () =>
       element
         .getAnimations({ subtree: true })
-        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .filter(
+          (animation) =>
+            animation.effect?.getTiming().iterations !== Infinity &&
+            animation.playState === 'running',
+        )
     for (let batch = pending(); batch.length > 0; batch = pending()) {
       await Promise.allSettled(batch.map((animation) => animation.finished))
     }

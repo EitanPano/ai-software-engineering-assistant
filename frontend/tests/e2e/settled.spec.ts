@@ -45,6 +45,27 @@ test.describe('settled', () => {
     expect(opacity).toBe('1')
   })
 
+  test('resolves when a finished animation holds its end state with fill forwards', async ({
+    page,
+  }) => {
+    await page.setContent(`<div id="host"><p id="note">Done</p></div>`)
+    const host = page.locator('#host')
+    await host.evaluate((element) => {
+      const note = element.querySelector('#note')
+      if (!note) throw new Error('no note')
+      // 100 ms fade-in that stays in getAnimations() after it finishes.
+      note.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 100, fill: 'forwards' })
+    })
+
+    await settled(host)
+
+    const state = await host.evaluate((element) =>
+      element.getAnimations({ subtree: true }).map((a) => a.playState),
+    )
+    expect(state).toEqual(['finished'])
+    await expect(page.locator('#note')).toHaveCSS('opacity', '1')
+  })
+
   test('resolves when the animated element is removed mid-fade', async ({ page }) => {
     await page.setContent(PAGE)
     const host = page.locator('#host')
