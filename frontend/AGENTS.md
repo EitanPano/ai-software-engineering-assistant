@@ -339,6 +339,9 @@ inline` maps them to utilities (`bg-primary`, `text-muted-foreground`) and `@cus
   run about once per 15 minutes per stack, and it leaves its accounts in that stack's `app`
   database. The catalog's case runner brings a stack up and down with its volumes, so it is
   unaffected.
+- **A failed run's web servers.** `scripts/web-server-tail.ts` is a reporter after `list`: it
+  prints each server's last lines after the summary, so they fall in the end of the output
+  `verify` keeps. A server that dies without writing leaves no line, and no exit code is recorded.
 - **The Anthropic fake.** `playwright.config.ts` starts a third web server, `python -m
 tests.fake_anthropic` from `backend/` on port 8101, before the API, and points the API at it
   (`ANTHROPIC_BASE_URL`, with a placeholder key). A journey picks the fake's script by markers in

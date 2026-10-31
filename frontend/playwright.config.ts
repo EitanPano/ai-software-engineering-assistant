@@ -26,7 +26,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: true,
   retries: 0,
-  reporter: 'list',
+  // In this order: `web-server-tail` prints after `list`'s summary, where `verify` keeps it.
+  reporter: [['list'], ['./scripts/web-server-tail.ts']],
   use: {
     baseURL: origin,
     trace: 'retain-on-failure',
@@ -52,6 +53,7 @@ export default defineConfig({
           // Messages API's SSE wire format, so the SDK's real stream handling runs in e2e with no
           // network and no key. It listens before the API starts; a journey picks its script by
           // markers in the message it sends.
+          name: 'anthropic',
           command: 'uv run python -m tests.fake_anthropic',
           cwd: '../backend',
           url: `http://127.0.0.1:${FAKE_PORT}/health`,
@@ -61,6 +63,7 @@ export default defineConfig({
         {
           // The GitHub fake (backend/tests/fake_github.py): the fixture repository as a tarball
           // behind a 302, the repository name picking the script. Listens before the API.
+          name: 'github',
           command: 'uv run python -m tests.fake_github',
           cwd: '../backend',
           url: `http://127.0.0.1:${GITHUB_FAKE_PORT}/health`,
@@ -70,6 +73,7 @@ export default defineConfig({
         {
           // The Voyage fake (backend/tests/fake_voyage.py): deterministic unit vectors, and a
           // marker that fails the call until released.
+          name: 'voyage',
           command: 'uv run python -m tests.fake_voyage',
           cwd: '../backend',
           url: `http://127.0.0.1:${VOYAGE_FAKE_PORT}/health`,
@@ -81,6 +85,7 @@ export default defineConfig({
           // scaled so the suite does not trip them. Playwright starts web servers before its
           // global setup, so the browser-test database is prepared in the same command, before
           // the API connects to it.
+          name: 'api',
           command: 'uv run poe e2e-db && uv run python -m app.main',
           cwd: '../backend',
           url: 'http://127.0.0.1:8000/api/health',
@@ -102,8 +107,10 @@ export default defineConfig({
         {
           // The production bundle behind `vite preview`, which proxies /api to the API above
           // (vite.config.ts). The build runs first, so a broken bundle fails here.
+          name: 'preview',
           command: 'bun run build && bun run preview',
           url: origin,
+          stdout: 'pipe',
           reuseExistingServer: false,
           timeout: 300_000,
         },
