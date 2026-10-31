@@ -199,6 +199,11 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-10-31: search limit. `GET /api/search` takes `RATE_LIMITS.search_per_user`, 5 a minute per
+  user, after `require_auth`, and answers 429 `rate_limited` before any call to Voyage and before
+  any pooled connection. It bounds one account: total spend and the pool across accounts stay open,
+  and a call to `search_knowledge_base` that is not this route is not limited. `/search` gains its
+  own error boundary for the wait.
 - 2026-10-31: search. Route `GET /api/search`, any signed-in account, and the screen `/search`.
   `0006-hybrid-search.sql` adds `pg_trgm`, the stored `chunk.keyword` and the GIN and HNSW indexes,
   and `0007-analyze-search-tables.sql` analyzes the three tables once. An index refreshes their

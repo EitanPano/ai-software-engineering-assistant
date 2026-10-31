@@ -13,6 +13,14 @@ export function createTestClient() {
   })
 }
 
+// The client `main.tsx` builds: a read is fresh for 30 s. A test of a boundary's retry uses it, so
+// the retry is proved under the freshness the app runs with, not the test client's none.
+export function createAppClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 30_000 }, mutations: { retry: false } },
+  })
+}
+
 // Shows where the router is, so a test can assert a navigation.
 export function Where() {
   const { pathname, search } = useLocation()

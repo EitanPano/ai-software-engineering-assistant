@@ -21,6 +21,7 @@ import SiteLoading from './(site)/loading'
 import SiteNotFound from './(site)/not-found'
 import HomePage from './(site)/page'
 import ProfilePage from './(site)/profile/page'
+import SearchError from './(site)/search/error'
 import SearchPage from './(site)/search/page'
 import ConnectSourcePage from './(site)/source/connect/page'
 import SourceListPage from './(site)/source/page'
@@ -59,10 +60,12 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                   Component: ProfilePage,
                 },
                 {
-                  // No prefetch: the page's Suspense, keyed by the text, shows the skeleton.
+                  // No prefetch: the page's Suspense, keyed by the text, shows the skeleton. The
+                  // segment's boundary words the search limit; any other failure is the group's.
                   path: 'search',
                   loader: ({ request }) => requireAccount(queryClient, returnToOf(request)),
                   Component: SearchPage,
+                  ErrorBoundary: SearchError,
                 },
                 {
                   path: 'conversation',

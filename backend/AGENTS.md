@@ -463,8 +463,9 @@ changes only by plan.
 
 ## Search
 
-- `GET /api/search?q=&limit=` (`api/search/`, any signed-in account, `require_auth` and no role):
-  `q` is 1 to 500 characters after trimming with no NUL, `limit` 1 to 20 (default 10). It answers
+- `GET /api/search?q=&limit=` (`api/search/`, any signed-in account, `require_auth` and no role,
+  then the limiter, declared after it because its key is the caller): `q` is 1 to 500 characters
+  after trimming with no NUL, `limit` 1 to 20 (default 10). It answers
   `SearchResult { items: SearchHit[], incomplete }`, a bounded top-k with no cursor; Voyage down or
   limiting is a 503 `upstream_unavailable`, never a keyword-only answer. `SEARCH` in
   `config/constants.py` holds every number (RRF `rrf_k` 60, `candidates` 50 per search,
@@ -476,6 +477,17 @@ changes only by plan.
   seconds. A cancelled statement (SQLSTATE 57014) is a 503 `upstream_unavailable`
   (`services/utils/postgres_error.py`). Only the search sets it; the pool-wide timeout is a
   later decision.
+- The limit. `RATE_LIMITS.search_per_user` is 5 a minute per user (`by_caller`; no role is exempt),
+  so one account spends about $0.15 a day at Voyage at 170 tokens a search: an estimate, not a
+  ceiling, because it counts searches and not tokens. The gate runs before validation and the
+  handler, so every authenticated attempt counts, a 400 and a 503 included; a refused search is
+  a 429 `rate_limited` (`Retry-After`: the window, an upper bound) that calls neither Voyage nor
+  the pool, and a request with no token is a 401 that counts nothing. The window is fixed, so up
+  to 10 pass across a boundary, which the pool of 10 connections holds at once. It bounds one
+  account: many accounts still reach the pool and Voyage's total, and a call to
+  `search_knowledge_base` that is not this route (the `knowledge` MCP server) is not limited here.
+  `TestRateLimit` in `tests/test_search.py` counts from the constant, never a literal, and each
+  caller holds one `headers`, because `member_bearer()` mints a new caller on every call.
 - Exported rules. `api/search/controller.py › search_knowledge_base(text=, limit=)` embeds the text
   (`services/voyage.py › embed_query`, outside any transaction), runs a trigram search only for one
   word of 3 to 100 characters (a two-letter word has no trigram of its own, only padded ones), and

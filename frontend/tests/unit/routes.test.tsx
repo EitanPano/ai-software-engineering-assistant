@@ -1,9 +1,9 @@
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { renderRoutes } from './render-routes'
-import { envelope, stubApi } from './support'
+import { createAppClient, envelope, stubApi } from './support'
 
 // The route table, rendered in a memory router against a stubbed API: loaders, the group
 // fallbacks and error boundaries, and the guards, end to end except the network.
@@ -51,6 +51,49 @@ describe('the home route', () => {
     healthy = true
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
 
+    expect(await screen.findByText(/API v1\.2\.3/)).toBeInTheDocument()
+  })
+})
+
+describe('the group retry with the cache fresh as in the app', () => {
+  it('re-runs a failed loader from the boundary and shows the page', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    let healthy = false
+    stubApi({
+      'GET /api/health': () => (healthy ? Response.json(HEALTH) : envelope('internal', 500)),
+      'GET /api/user/me': envelope('unauthenticated', 401),
+    })
+
+    renderRoutes('/', createAppClient())
+    expect(await screen.findByText('Something went wrong')).toBeInTheDocument()
+
+    healthy = true
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByText(/API v1\.2\.3/)).toBeInTheDocument()
+  })
+
+  it('re-runs a failed loader on a URL with a hash, as the skip link makes', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    let healthy = false
+    const fetchMock = stubApi({
+      'GET /api/health': () => (healthy ? Response.json(HEALTH) : envelope('internal', 500)),
+      'GET /api/user/me': envelope('unauthenticated', 401),
+    })
+    const healthRequests = () =>
+      fetchMock.mock.calls.filter(([request]) => new URL(request.url).pathname === '/api/health')
+        .length
+
+    renderRoutes('/#main', createAppClient())
+    expect(await screen.findByText('Something went wrong')).toBeInTheDocument()
+    expect(healthRequests()).toBe(1)
+
+    healthy = true
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => {
+      expect(healthRequests()).toBe(2)
+    })
     expect(await screen.findByText(/API v1\.2\.3/)).toBeInTheDocument()
   })
 })

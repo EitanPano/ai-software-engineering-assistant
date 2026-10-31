@@ -183,6 +183,12 @@ class TestTheDocument:
         create = as_object(as_object(paths["/api/conversation"])["post"])
         assert set(as_object(create["responses"])) == {"201", "401", "500"}
 
+    def test_documents_the_search_with_its_429(self) -> None:
+        doc = build_openapi_document(app)
+
+        get = as_object(as_object(as_object(doc["paths"])["/api/search"])["get"])
+        assert set(as_object(get["responses"])) == {"200", "400", "401", "429", "500", "503"}
+
     def test_sets_the_document_metadata(self) -> None:
         doc = build_openapi_document(app)
 

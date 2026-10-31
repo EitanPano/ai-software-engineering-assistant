@@ -1469,6 +1469,10 @@ export type GetApiSearchErrors = {
    */
   401: ErrorBody
   /**
+   * Rate limited
+   */
+  429: ErrorBody
+  /**
    * Unexpected error
    */
   500: ErrorBody

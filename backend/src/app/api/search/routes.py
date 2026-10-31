@@ -8,8 +8,19 @@ from fastapi import APIRouter, Depends
 
 from app.api.search.controller import search
 from app.api.search.schema import SearchResult
+from app.config.constants import RATE_LIMITS
 from app.middleware.auth import require_auth
+from app.middleware.rate_limit import by_caller, rate_limit
 from app.services.utils.openapi import error_responses
+
+# After `require_auth`: the key is the caller. A search spends a Voyage request and holds a pooled
+# connection, so it is limited per user, and the gate refuses before either.
+search_limit = rate_limit(
+    name="search_per_user",
+    limit=RATE_LIMITS.search_per_user.limit,
+    window=RATE_LIMITS.search_per_user.window,
+    key=by_caller,
+)
 
 router = APIRouter()
 
@@ -20,8 +31,8 @@ router.add_api_route(
     status_code=200,
     response_model=SearchResult,
     response_description="The best chunks of every ready source, best first",
-    responses={**error_responses(400, 401, 500, 503)},
+    responses={**error_responses(400, 401, 429, 500, 503)},
     summary="Search the knowledge base",
     tags=["search"],
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_auth), Depends(search_limit)],
 )

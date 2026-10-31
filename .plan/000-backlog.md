@@ -18,7 +18,8 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] search is rate limited per user
+- [ ] settled e2e test does not race its timers | stack:frontend
+- [ ] verify keeps the web server's output when e2e fails
 - [ ] admin can measure retrieval quality with an eval run
 - [ ] agent searches the knowledge base through our MCP server
 - [ ] user approves sensitive tool calls
@@ -27,6 +28,9 @@ Example: `- [ ] user can sign in with email`
 - [ ] agent returns schema-validated structured results
 - [ ] admin can measure answer correctness with an eval run
 - [ ] agent runs have a spend cap
+- [ ] search has a global spend cap
+- [ ] concurrent searches are capped below the pool size
+- [ ] reloading a guarded route in development stays on that route | stack:frontend
 - [ ] starting a conversation is rate limited
 - [ ] user can reset their password
 - [ ] user can delete a conversation
@@ -47,3 +51,4 @@ Example: `- [ ] user can sign in with email`
 - [x] move the database to Postgres 18 with pgvector and add grant_admin (2026-10-30, plan 003)
 - [x] admin can connect a GitHub repository to the knowledge base (2026-10-31, plan 004)
 - [x] user can search the knowledge base with hybrid search (2026-10-31, plan 005)
+- [x] search is rate limited per user (2026-10-31, plan 006)

@@ -8,24 +8,28 @@ filters work, not that the real model relates a paraphrase to its chunk (`tests/
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
+from typing import Final
 
 import httpx
 import httpx2
 import pytest
+import time_machine
 from pydantic import BaseModel, ValidationError
 
 from app.api.search.controller import search_knowledge_base
 from app.api.search.schema import SearchQuery
 from app.api.source import service
 from app.api.source.controller import index_source, search_ready_chunks
-from app.config.constants import SEARCH
+from app.config.constants import RATE_LIMITS, SEARCH
 from app.models.search.interface import SearchOutcome
 from app.models.source.enums import SourceStatus
 from app.models.source.interface import ChunkRecord, DocumentRecord, SourceRecord
-from app.services import voyage
+from app.services import cache, voyage
 from app.services.db import get_db
 from app.services.utils import clock
 from tests import fake_voyage
+from tests.agent_support import bearer
 from tests.fixture_repository import (
     DOTTED_QUERY,
     EXPECTED_DOTTED,
@@ -160,6 +164,121 @@ class TestAccess:
             assert res.status_code == 200, res.text
             assert res.json() == {"items": [], "incomplete": False}
         assert [body["input_type"] for body in fake_voyage.state.requests] == ["query"] * 2
+
+
+WINDOW_START: Final = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+async def search_as(
+    client: httpx.AsyncClient, headers: dict[str, str], q: str = "check_limit"
+) -> httpx.Response:
+    return await client.get("/api/search", params={"q": q}, headers=headers)
+
+
+@store_backed
+@pytest.mark.usefixtures("empty_store", "fakes")
+class TestRateLimit:
+    """`RATE_LIMITS.search_per_user`: a signed-in caller's searches, counted from the first,
+    whatever the answer. Each caller holds one `headers`, because `member_bearer()` mints a new
+    caller on every call, and every new caller has a bucket of its own."""
+
+    async def test_searches_over_the_per_user_limit_are_rate_limited(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        headers = member_bearer()
+        for _ in range(RATE_LIMITS.search_per_user.limit):
+            allowed = await search_as(client, headers)
+            assert allowed.status_code == 200, allowed.text
+
+        res = await search_as(client, headers)
+        someone_else = await search_as(client, member_bearer())
+
+        assert res.status_code == 429
+        assert error_of(res).code == "rate_limited"
+        assert int(res.headers["retry-after"]) > 0
+        assert res.json()["requestId"]
+        assert someone_else.status_code == 200  # the limit is per user
+
+    async def test_an_admin_is_limited_like_a_member(self, client: httpx.AsyncClient) -> None:
+        headers = admin_bearer()
+        for _ in range(RATE_LIMITS.search_per_user.limit):
+            allowed = await search_as(client, headers)
+            assert allowed.status_code == 200, allowed.text
+
+        res = await search_as(client, headers)
+
+        assert res.status_code == 429
+        assert error_of(res).code == "rate_limited"
+
+    async def test_a_limited_search_reaches_no_voyage_call(self, client: httpx.AsyncClient) -> None:
+        headers = member_bearer()
+        for _ in range(RATE_LIMITS.search_per_user.limit):
+            allowed = await search_as(client, headers)
+            assert allowed.status_code == 200, allowed.text
+        assert len(fake_voyage.state.requests) == RATE_LIMITS.search_per_user.limit
+
+        for _ in range(2):
+            res = await search_as(client, headers)
+            assert res.status_code == 429
+
+        assert len(fake_voyage.state.requests) == RATE_LIMITS.search_per_user.limit
+
+    async def test_a_rejected_text_counts_against_the_limit(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        headers = member_bearer()
+        for _ in range(RATE_LIMITS.search_per_user.limit):
+            rejected_text = await search_as(client, headers, q="   ")
+            assert rejected_text.status_code == 400
+            assert error_of(rejected_text).code == "validation_failed"
+
+        res = await search_as(client, headers)
+
+        assert res.status_code == 429
+        assert error_of(res).code == "rate_limited"
+        assert fake_voyage.state.requests == []
+
+    async def test_no_token_is_a_401_and_counts_nothing(
+        self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        keys: list[str] = []
+        incr = cache.incr
+
+        async def recording_incr(key: str, ttl_ms: int) -> int:
+            keys.append(key)
+            return await incr(key, ttl_ms)
+
+        monkeypatch.setattr(cache, "incr", recording_incr)
+
+        for _ in range(RATE_LIMITS.search_per_user.limit + 1):
+            res = await client.get("/api/search?q=check_limit")
+            assert res.status_code == 401
+            assert error_of(res).code == "unauthenticated"
+            assert res.json()["requestId"]
+
+        assert keys == []
+        assert fake_voyage.state.requests == []
+
+    async def test_a_new_window_searches_again(self, client: httpx.AsyncClient) -> None:
+        """A refused attempt leaves the window's expiry alone: it ends one window after the first
+        search, however many were refused in between. The same caller is minted again at the new
+        time, because an access token lives 15 minutes."""
+        window = clock.parse_duration(RATE_LIMITS.search_per_user.window)
+        caller = str(uuid.uuid4())
+
+        with time_machine.travel(WINDOW_START, tick=False) as traveller:
+            for _ in range(RATE_LIMITS.search_per_user.limit):
+                allowed = await search_as(client, bearer(caller))
+                assert allowed.status_code == 200, allowed.text
+            traveller.shift(window / 2)
+            refused = await search_as(client, bearer(caller))
+            traveller.shift(window / 2 + timedelta(seconds=1))
+
+            res = await search_as(client, bearer(caller))
+
+        assert refused.status_code == 429
+        assert res.status_code == 200, res.text
+        assert len(fake_voyage.state.requests) == RATE_LIMITS.search_per_user.limit + 1
 
 
 async def indexed_fixture(client: httpx.AsyncClient) -> str:

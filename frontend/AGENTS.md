@@ -119,7 +119,12 @@ export const healthQuery = () =>
   data is already there from the loader; a later refetch that fails reaches the same boundary.
 - **Expiry**: a mutation invalidates the keys of the entities it changes
   (`queryClient.invalidateQueries({ queryKey: healthKey() })`), so the widgets show the new value.
-- The query client (`main.tsx`) does not retry and treats a read as fresh for 30 s.
+- The query client (`main.tsx`) does not retry and treats a read as fresh for 30 s. A read that
+  costs the user something overrides it: `searchQuery` sets `staleTime: Infinity`, because each
+  search counts against the server's limit and focus, reconnect and Back to an earlier text would
+  each send one. A reload or the 5 minutes off screen ask again. A search refused by the limit is
+  not kept: its wait state drops it as it unmounts (`dropFailedSearch`), and the boundary's retry
+  resets any search that failed.
 
 ### Mutations
 
@@ -261,7 +266,17 @@ inline` maps them to utilities (`bg-primary`, `text-muted-foreground`) and `@cus
   what no group caught. A group is a pathless route inside the group's layout, so its boundary
   renders inside the shell. Every widget has a skeleton that matches its layout. Error messages
   are user-safe: no stack trace, no query text, no internal URL or secret. The boundary logs the
-  cause with `console.error`; its retry drops the failed queries and re-runs the loaders.
+  cause with `console.error`; its retry (`useSiteRetry`) resets the queries in the error state (a
+  result the user holds stays) and navigates to the same path and query with `replace`, which
+  re-runs the loaders and gives the boundary a new location. The hash is left out: a same-URL
+  navigation re-runs the loaders only without one, because the router reads two equal hashes as a
+  hash change and runs nothing (the skip link makes `/#main`), so a retry loses the fragment. A
+  `revalidate()` alone did not clear the boundary in the browser once the session read was
+  cached: the boundary resets only if it renders the revalidation as `loading`, which a click
+  inside a synchronous `act` does (Testing Library's `userEvent` and `fireEvent` both run in one)
+  and a browser's click does not. A test that must see it clicks with `element.click()` and
+  `IS_REACT_ACT_ENVIRONMENT = false` (`search-routes.test.tsx`); `search-rate-limit.spec.ts`
+  pins it in the browser.
 - The generated client does not throw on an HTTP error status: it returns
   `{ data, error, response }`, and on a network failure `response` is undefined and `error` is the
   thrown value. `call` (`src/shared/api/call.ts`) handles both, in that order, and is the only
@@ -286,6 +301,16 @@ inline` maps them to utilities (`bg-primary`, `text-muted-foreground`) and `@cus
   A feature overrides the entries that need its own words (`SIGN_IN_COPY` maps 401 to "Email or
   password is wrong." because the API cannot tell the two apart by design).
 
+- A segment that needs its own words for one code adds an `error.tsx` and sets it as that route's
+  `ErrorBoundary`: `(site)/search/error.tsx` words `rate_limited` ("Too many searches", wait about
+  a minute; `call` exposes no `Retry-After`, so it branches on `code` only) and renders the group's
+  `SiteError` for anything else. The group's retry is `useSiteRetry` in `(site)/error.tsx`; a
+  segment boundary uses it and never copies it. A failed suspense query is not asked again when
+  its page remounts, so the wait state (`SearchRateLimited`, not the whole boundary) drops the
+  search it was refused on as it unmounts (Back, the nav), in an effect cleanup that removes only
+  the query still holding the error the wait shows (compared by identity: a suspense query throws
+  `query.state.error` itself), so the retry's own newer failure stays. A 503 is not dropped there:
+  the embedding may have been paid, and a retry the user did not choose would pay it again.
 - A query function that goes through `call` throws the `ActionError`; the route's boundary shows
   the generic message. A mutation's handler shows `error.message` (it is our copy) with
   `toast.error`, as `RefreshHealthButton` does.

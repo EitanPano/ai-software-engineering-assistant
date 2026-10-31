@@ -43,6 +43,7 @@ class RateLimits:
     otp_verification_per_ip: RateLimit
     message_per_user: RateLimit
     run_stream_per_user: RateLimit
+    search_per_user: RateLimit
 
 
 RATE_LIMITS: Final = RateLimits(
@@ -58,6 +59,13 @@ RATE_LIMITS: Final = RateLimits(
     # 30 sends need at least 30 opens. Opens per window times the lifetime caps the streams one
     # account can hold at once.
     run_stream_per_user=RateLimit(limit=60, window="15m"),
+    # Every search embeds its text at Voyage and holds a pooled connection. Cost: 5 a minute is at
+    # most 7,200 a day, about $0.15 a day for one account at 170 tokens a search: an estimate, not
+    # a ceiling, because this counts searches and not tokens. Pool: a fixed window lets twice the
+    # limit through across a boundary, 10 searches, which the pool of 10 connections holds at once,
+    # and a short window keeps one account from queueing others past the 5 s acquire wait. A longer
+    # one (60 per 15 minutes) lets it fill the pool for 18 s. Bounds one account, not total spend.
+    search_per_user=RateLimit(limit=5, window="1m"),
 )
 
 
