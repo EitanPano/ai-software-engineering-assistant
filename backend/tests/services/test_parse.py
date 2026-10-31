@@ -9,6 +9,7 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -359,12 +360,14 @@ class TestManyCraftedFiles:
         with ParseSession(limits(file_seconds=0.3, index_seconds=1.0)) as opened:
             results = [opened.symbols("typescript", CRAFTED_TYPESCRIPT) for _ in range(100)]
             started = opened.started
-            alive = opened.child_alive
 
         assert results == [None] * 100
         assert opened.budget_spent is True
+        # Each child that is started and overruns is charged at least `file_seconds` (0.3), so a
+        # 1.0 s budget allows at most 1.0 / 0.3 rounded up, plus one: 5 whatever the start costs.
         assert started <= 6, started
-        assert alive is False
+        # The child ends with the index: after the session, none is left running.
+        assert opened.child_alive is False
         assert time.monotonic() - began < 20
 
     def test_a_crash_on_every_file_never_loops_unbounded(self) -> None:
@@ -741,11 +744,25 @@ class TestAWorkerThatNeverStarts:
 
 
 class TestTheBudgetIsWallTime:
-    def test_a_start_is_charged(self) -> None:
-        with ParseSession(limits()) as opened:
-            opened.symbols("python", "x = 1\n")
+    def test_a_start_is_charged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Deterministic on any machine: the clock is a fake that the start advances by a known
+        amount, so the budget must have been charged exactly that, however fast a start is."""
+        now = [100.0]
+        start_cost = 7.0
+        real_start = parse._start_child
 
-            assert opened.spent_seconds > 0.05  # a start costs more than one trivial parse
+        def slow_start() -> object:
+            child = real_start()
+            now[0] += start_cost
+            return child
+
+        monkeypatch.setattr("app.services.parse._start_child", slow_start)
+        monkeypatch.setattr("app.services.parse.time", SimpleNamespace(monotonic=lambda: now[0]))
+
+        with ParseSession(limits(file_seconds=0.6, index_seconds=60.0)) as opened:
+            assert opened.symbols("python", "x = 1\n") is not None
+
+            assert opened.spent_seconds == start_cost
 
     def test_a_crash_is_charged_its_wall_time_not_nothing(self) -> None:
         with ParseSession(limits(file_seconds=5)) as opened:
