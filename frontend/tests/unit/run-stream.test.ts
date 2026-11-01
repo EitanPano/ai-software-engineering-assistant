@@ -219,3 +219,63 @@ describe('streamRun', () => {
     expect(onEvent).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('streamRun at an approval', () => {
+  const asked: RunEvent = {
+    type: 'approval_requested',
+    sequence: 3,
+    createdAt: at,
+    approvalId: 'a1',
+    toolUseId: 't1',
+    argumentsDigest: 'a'.repeat(64),
+  }
+  const answered: RunEvent = {
+    type: 'approval_decided',
+    sequence: 4,
+    createdAt: at,
+    approvalId: 'a1',
+    toolUseId: 't1',
+    decision: 'approved',
+  }
+
+  it('reports paused on a clean close while an approval is undecided, and reopens nothing', async () => {
+    const fetchMock = stubStream([sse([started(1), asked])])
+    const sleep = vi.fn(noSleep)
+
+    const outcome = await streamRun('r1', {
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+      sleep,
+    })
+
+    expect(outcome).toBe('paused')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('goes on when the approval was decided before the close', async () => {
+    stubStream([sse([started(1), asked, answered]), sse([finished(5)])])
+
+    const outcome = await streamRun('r1', {
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+      sleep: noSleep,
+    })
+
+    expect(outcome).toBe('finished')
+  })
+
+  it('still reopens after a dropped connection with an approval open', async () => {
+    const fetchMock = stubStream([new Error('drop'), sse([asked])])
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    const outcome = await streamRun('r1', {
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+      sleep: noSleep,
+    })
+
+    expect(outcome).toBe('paused')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})

@@ -28,8 +28,31 @@ class TestDecide:
         """Only the `allow` effect passes."""
         assert tool.decide(PolicyEffect.allow) == "allow"
         assert tool.decide(PolicyEffect.deny) == "deny"
-        # Until the approval task lands, `ask` is refused like `deny`.
-        assert tool.decide(PolicyEffect.ask) == "deny"
+        # Plan 011: `ask` waits for a person; plan 010 refused it like `deny`.
+        assert tool.decide(PolicyEffect.ask) == "ask"
+
+
+class TestArgumentsDigest:
+    def test_is_64_lowercase_hex_characters(self) -> None:
+        digest = tool.arguments_digest({"text": "hi"})
+
+        assert len(digest) == 64
+        assert digest == digest.lower()
+        assert int(digest, 16) >= 0
+
+    def test_does_not_depend_on_key_order(self) -> None:
+        assert tool.arguments_digest({"a": 1, "b": [1, {"c": 2, "d": 3}]}) == tool.arguments_digest(
+            {"b": [1, {"d": 3, "c": 2}], "a": 1}
+        )
+
+    @pytest.mark.parametrize(
+        "other", [{"text": "ho"}, {"text": "hi", "x": 1}, {"txt": "hi"}, {"text": "hi "}, {}]
+    )
+    def test_differs_when_the_arguments_differ(self, other: dict[str, object]) -> None:
+        assert tool.arguments_digest(other) != tool.arguments_digest({"text": "hi"})
+
+    def test_reads_non_ascii_text_as_written(self) -> None:
+        assert tool.arguments_digest({"text": "é"}) != tool.arguments_digest({"text": "é"})
 
     def test_is_empty_by_default(self) -> None:
         assert tool.definitions({}) == []

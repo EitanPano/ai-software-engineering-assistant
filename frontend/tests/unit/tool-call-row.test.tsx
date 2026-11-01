@@ -57,6 +57,52 @@ describe('ToolCallRow', () => {
   })
 })
 
+describe('ToolCallRow waiting for approval', () => {
+  const waiting = (input: Record<string, unknown>) =>
+    call({
+      status: 'awaiting_approval',
+      input,
+      approval: { approvalId: 'a1', argumentsDigest: 'a'.repeat(64) },
+    })
+
+  it('says it needs approval in words and shows the actions it is given', () => {
+    render(
+      <ToolCallRow
+        call={waiting({ text: 'hi' })}
+        actions={<button type="button">Approve call</button>}
+      />,
+    )
+
+    expect(screen.getByText('Needs approval')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve call' })).toBeInTheDocument()
+  })
+
+  it('shows the whole arguments, pretty-printed, in a labelled focusable scroll box', () => {
+    const text = 'x'.repeat(5000)
+    render(<ToolCallRow call={waiting({ text, nested: { n: 1 } })} />)
+
+    const box = screen.getByRole('group', { name: 'Arguments of knowledge__search' })
+    expect(box).toHaveAttribute('tabindex', '0')
+    expect(box).toHaveClass('overflow-auto')
+    expect(box.textContent).toContain(text)
+    expect(box.textContent).toContain('\n  "nested": {\n    "n": 1\n  }')
+  })
+
+  it('shows hidden characters in the arguments as code points', () => {
+    render(<ToolCallRow call={waiting({ text: 'a‮b\u{E0041}c' })} />)
+
+    const box = screen.getByRole('group', { name: 'Arguments of knowledge__search' })
+    expect(box.textContent).toContain('a[U+202E]b[U+E0041]c')
+  })
+
+  it('shows no actions on a decided call', () => {
+    render(<ToolCallRow call={call({ status: 'succeeded' })} />)
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByText('Needs approval')).not.toBeInTheDocument()
+  })
+})
+
 describe('McpServerNotice', () => {
   it('names the server in our words and says the run goes on', () => {
     render(<McpServerNotice name="knowledge" />)

@@ -38,6 +38,17 @@ class ToolCallRecord:
 
 
 @dataclass(frozen=True)
+class PendingTurn:
+    """What a paused run keeps in `run.pending_turn`: the assistant turn's `response.content` whole
+    and the `tool_result` blocks already known, in the model's order. The resume appends both as
+    two turns; until then neither is in `message`, so history never holds an unanswered
+    `tool_use`."""
+
+    content: list[dict[str, object]]
+    results: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
 class RunEventRecord:
     run_id: str
     sequence: int

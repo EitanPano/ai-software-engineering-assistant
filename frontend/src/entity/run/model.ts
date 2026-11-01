@@ -1,7 +1,11 @@
 import type { Run, RunEvent } from '@/shared/api'
 
 export type RunErrorCode = NonNullable<Run['errorCode']>
-export type ToolStatus = 'running' | 'succeeded' | 'failed' | 'denied'
+export type ToolStatus =
+  'running' | 'awaiting_approval' | 'approved' | 'succeeded' | 'failed' | 'denied'
+
+// What a decision must echo: the id to decide and the digest of the arguments the person was shown.
+export type PendingApproval = { approvalId: string; argumentsDigest: string }
 
 export type RunBlock =
   | { kind: 'text'; text: string }
@@ -14,6 +18,8 @@ export type RunBlock =
       input: Record<string, unknown>
       status: ToolStatus
       output?: string
+      // Present only while the call waits for a person.
+      approval?: PendingApproval
     }
 
 // What the person sees of one run, built by folding its events in order. `lastSequence` is the
@@ -65,6 +71,31 @@ export function applyRunEvent(view: RunView, event: RunEvent): RunView {
             : block,
         ),
       }
+    case 'approval_requested':
+      return {
+        ...next,
+        blocks: view.blocks.map((block) =>
+          block.kind === 'tool' && block.toolUseId === event.toolUseId
+            ? {
+                ...block,
+                status: 'awaiting_approval',
+                approval: { approvalId: event.approvalId, argumentsDigest: event.argumentsDigest },
+              }
+            : block,
+        ),
+      }
+    case 'approval_decided':
+      // Shown at once, as decided. The run resumes only after the last decision of a pause, so an
+      // approved call has not started (`approved`, not `running`) and a rejected one is `denied`
+      // now, however long another call of the pause waits. `tool_call_finished` ends it.
+      return {
+        ...next,
+        blocks: view.blocks.map((block) => {
+          if (block.kind !== 'tool' || block.toolUseId !== event.toolUseId) return block
+          const { approval: _approval, ...rest } = block
+          return { ...rest, status: event.decision === 'approved' ? 'approved' : 'denied' }
+        }),
+      }
     case 'mcp_server_unavailable':
       return { ...next, blocks: [...view.blocks, { kind: 'notice', name: event.name }] }
     case 'run_finished':
@@ -89,10 +120,16 @@ export function runErrorCopy(code: Run['errorCode']): string {
 }
 
 export const isActiveRun = (run: Pick<Run, 'status'> | null | undefined): boolean =>
-  run?.status === 'queued' || run?.status === 'running'
+  run?.status === 'queued' || run?.status === 'running' || run?.status === 'awaiting_approval'
+
+// True while any tool call in the view waits for a person's decision.
+export const isAwaitingApproval = (view: RunView): boolean =>
+  view.blocks.some((block) => block.kind === 'tool' && block.status === 'awaiting_approval')
 
 export const TOOL_STATUS_LABEL: Record<ToolStatus, string> = {
   running: 'Running',
+  awaiting_approval: 'Needs approval',
+  approved: 'Approved',
   succeeded: 'Succeeded',
   failed: 'Failed',
   denied: 'Denied',

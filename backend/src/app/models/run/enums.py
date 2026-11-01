@@ -9,6 +9,7 @@ from enum import StrEnum
 class RunStatus(StrEnum):
     queued = "queued"
     running = "running"
+    awaiting_approval = "awaiting_approval"
     completed = "completed"
     failed = "failed"
 
@@ -28,10 +29,14 @@ class RunEventType(StrEnum):
     tool_call_started = "tool_call_started"
     tool_call_finished = "tool_call_finished"
     mcp_server_unavailable = "mcp_server_unavailable"
+    approval_requested = "approval_requested"
+    approval_decided = "approval_decided"
     run_finished = "run_finished"
 
 
 class ToolCallStatus(StrEnum):
+    # Stored on a call that waits for a person; never on the wire (`ToolCallStatusName`).
+    awaiting_approval = "awaiting_approval"
     succeeded = "succeeded"
     failed = "failed"
     denied = "denied"

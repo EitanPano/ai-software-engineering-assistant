@@ -47,8 +47,8 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
    ends that lost run as `interrupted`, and pending approvals survive.
 9. Tools: the backend is the MCP client, never Anthropic's MCP connector, whose tool calls run
    on Anthropic's side where the approval gate cannot intercept them. `tool_policy` decides each
-   call: allow, ask or deny. A tool with no policy is denied, and `ask` denies until approvals
-   exist. Every run lists each enabled server and stores the last good listing on its
+   call: allow, ask or deny. A tool with no policy is denied, and `ask` holds the call for a
+   person. Every run lists each enabled server and stores the last good listing on its
    `mcp_server` row; the model sees `<server>__<tool>`, and a server that is down is reported in
    the run, which goes on. `knowledge`'s URL and token come from the environment, any other row's
    URL from the row. A conversation stores its system prompt and tool definitions at its first
@@ -58,6 +58,12 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
    slots and that budget bound what the route's rate limit does not reach.
 10. Approval: an `ask` call stops the run at `awaiting_approval`, with no process waiting. The
     decision resumes the run from Postgres, so an approval may take hours and survive a restart.
+    The turn it paused on stays on `run`, not in `message`, because a served `tool_use` must have
+    its `tool_result` in the next user turn. A decision echoes the arguments digest the person was
+    shown; at execution that digest, the row's server and tool and every gate are checked again,
+    so a changed row, a later `deny` or a disabled server denies. A rejection reaches the model as
+    a fixed text and the run goes on. The resume claims the paused turn in one statement, so an
+    approved call runs at most once, and a run lost after its last decision ends `interrupted`.
 11. Retrieval: hybrid search fuses `pgvector`, full-text and trigram results with reciprocal rank
     fusion (RRF), over the chunks of `ready` sources only. A signed-in person searches at
     `/search`; the agent reaches it only through the `knowledge` MCP server and decides when to
@@ -101,10 +107,12 @@ Planned; each task's migration creates its tables and the code wins on conflict.
   run.
 - `message`: `conversation`, `run`; position, role (`user`, `assistant`, `tool_result`), content
   blocks (JSONB), text.
-- `run`: `conversation`, owner `user`; status, error code. No model or token usage yet.
+- `run`: `conversation`, owner `user`; status, error code, the pending turn of a paused run. No
+  model or token usage yet.
 - `run_event`: `run`; sequence number, type, payload (JSONB).
 - `tool_call`: `run`, tool use id; `mcp_server`, tool name, arguments, result, status.
-- `approval`: `tool_call`; decision, deciding `user`, reason.
+- `approval`: `run`, `tool_call`, deciding `user`; arguments digest, decision (null until
+  decided), decided at. A rejection carries no reason: the person says why in their next message.
 - `tool_policy`: `mcp_server`, tool name; effect (allow, ask, deny).
 - `mcp_server`: name, URL (null for `knowledge`), enabled, last good tool definitions.
 - `source`: repository URL, ref, status, error code, indexed commit, counts.
@@ -215,6 +223,13 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-11-01: a person approves sensitive tool calls. `POST /api/approval/{id}/decision` is new,
+  owner only: another account's approval is a 404, an admin's included. `run.status` gains
+  `awaiting_approval`, which `run_active_conversation_idx` covers, so a send during a pause stays
+  the 409, and the sweep leaves it alone. `run` gains `pending_turn`, `tool_call.status` gains
+  `awaiting_approval`, stored and never on the wire, and table `approval` is new (`0010`), with no
+  `reason`. Run events gain `approval_requested` and `approval_decided`, and a stream now closes
+  once a run is at rest. No shipped tool is at `ask` yet: the GitHub task sets the first.
 - 2026-11-01: the agent searches through our `knowledge` MCP server, the first tool offered to the
   real model. A new process, `python -m app.knowledge_main`, is a new auth boundary: `POST /mcp`
   takes `Authorization: Bearer <KNOWLEDGE_MCP_TOKEN>`, else 401, behind a `Host` allow-list, with

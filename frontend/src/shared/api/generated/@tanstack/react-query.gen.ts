@@ -18,6 +18,7 @@ import {
   getApiUserMe,
   type Options,
   patchApiUserMe,
+  postApiApprovalByIdDecision,
   postApiAuthLogin,
   postApiAuthLogout,
   postApiAuthOtp,
@@ -70,6 +71,9 @@ import type {
   PatchApiUserMeData,
   PatchApiUserMeError,
   PatchApiUserMeResponse,
+  PostApiApprovalByIdDecisionData,
+  PostApiApprovalByIdDecisionError,
+  PostApiApprovalByIdDecisionResponse,
   PostApiAuthLoginData,
   PostApiAuthLoginError,
   PostApiAuthLoginResponse,
@@ -572,6 +576,33 @@ export const postApiConversationByIdMessageMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await postApiConversationByIdMessage({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Approve or reject a waiting tool call
+ */
+export const postApiApprovalByIdDecisionMutation = (
+  options?: Partial<Options<PostApiApprovalByIdDecisionData>>,
+): UseMutationOptions<
+  PostApiApprovalByIdDecisionResponse,
+  PostApiApprovalByIdDecisionError,
+  Options<PostApiApprovalByIdDecisionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiApprovalByIdDecisionResponse,
+    PostApiApprovalByIdDecisionError,
+    Options<PostApiApprovalByIdDecisionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postApiApprovalByIdDecision({
         ...options,
         ...fnOptions,
         throwOnError: true,

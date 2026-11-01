@@ -257,6 +257,26 @@ async def list_messages(
     return to_page([_to_message(row) for row in rows], limit, _message_cursor)
 
 
+@dataclass(frozen=True)
+class _CountRow:
+    total: int
+
+
+async def count_assistant_turns(
+    conversation_id: str, run_id: str, *, db: Executor | None = None
+) -> int:
+    """How many assistant turns the run has stored: its model calls that finished. The
+    conversation narrows the scan to the index on `(conversation_id, position)`."""
+    row = await fetch_one(
+        _CountRow,
+        "select count(*) as total from message "
+        "where conversation_id = %s and run_id = %s and role = 'assistant'",
+        (conversation_id, run_id),
+        db=db,
+    )
+    return 0 if row is None else row.total
+
+
 async def list_all_messages(
     conversation_id: str, *, db: Executor | None = None
 ) -> list[MessageRecord]:

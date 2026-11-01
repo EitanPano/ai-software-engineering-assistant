@@ -12,6 +12,22 @@ export type Accepted = {
 }
 
 /**
+ * Approval
+ */
+export type Approval = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Tooluseid
+   */
+  toolUseId: string
+  decision: 'approved' | 'rejected'
+  decidedAt: string
+}
+
+/**
  * AuthSession
  */
 export type AuthSession = {
@@ -96,6 +112,14 @@ export type ConversationPage = {
 export type Credentials = {
   email: string
   password: string
+}
+
+/**
+ * DecideApprovalBody
+ */
+export type DecideApprovalBody = {
+  decision: 'approved' | 'rejected'
+  argumentsDigest: string
 }
 
 /**
@@ -492,7 +516,7 @@ export type Run = {
    * Id
    */
   id: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
+  status: 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed'
   errorCode:
     | 'refused'
     | 'truncated'
@@ -593,6 +617,52 @@ export type RunEvent =
        * Name
        */
       name: string
+    }
+  | {
+      /**
+       * Type
+       */
+      type?: 'approval_requested'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+      /**
+       * Approvalid
+       */
+      approvalId: string
+      /**
+       * Tooluseid
+       */
+      toolUseId: string
+      /**
+       * Argumentsdigest
+       */
+      argumentsDigest: string
+    }
+  | {
+      /**
+       * Type
+       */
+      type?: 'approval_decided'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+      /**
+       * Approvalid
+       */
+      approvalId: string
+      /**
+       * Tooluseid
+       */
+      toolUseId: string
+      /**
+       * Decision
+       */
+      decision: 'approved' | 'rejected'
     }
   | {
       /**
@@ -1500,6 +1570,54 @@ export type GetApiRunByIdEventResponses = {
 
 export type GetApiRunByIdEventResponse =
   GetApiRunByIdEventResponses[keyof GetApiRunByIdEventResponses]
+
+export type PostApiApprovalByIdDecisionData = {
+  body?: DecideApprovalBody
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/approval/{id}/decision'
+}
+
+export type PostApiApprovalByIdDecisionErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type PostApiApprovalByIdDecisionError =
+  PostApiApprovalByIdDecisionErrors[keyof PostApiApprovalByIdDecisionErrors]
+
+export type PostApiApprovalByIdDecisionResponses = {
+  /**
+   * The recorded decision
+   */
+  200: Approval
+}
+
+export type PostApiApprovalByIdDecisionResponse =
+  PostApiApprovalByIdDecisionResponses[keyof PostApiApprovalByIdDecisionResponses]
 
 export type GetApiSourceData = {
   body?: never

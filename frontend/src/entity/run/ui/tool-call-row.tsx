@@ -1,4 +1,12 @@
-import { BanIcon, CheckIcon, LoaderCircleIcon, XIcon, type LucideIcon } from 'lucide-react'
+import {
+  BanIcon,
+  CheckIcon,
+  HandIcon,
+  LoaderCircleIcon,
+  XIcon,
+  type LucideIcon,
+} from 'lucide-react'
+import type { ReactNode } from 'react'
 
 import { visibleText } from '@/shared/lib/visible-text'
 import { Badge } from '@/shared/ui/badge'
@@ -10,6 +18,8 @@ const STATUS: Record<
   { variant: 'info' | 'success' | 'destructive' | 'warning'; icon: LucideIcon }
 > = {
   running: { variant: 'info', icon: LoaderCircleIcon },
+  awaiting_approval: { variant: 'warning', icon: HandIcon },
+  approved: { variant: 'info', icon: CheckIcon },
   succeeded: { variant: 'success', icon: CheckIcon },
   failed: { variant: 'destructive', icon: XIcon },
   denied: { variant: 'warning', icon: BanIcon },
@@ -28,16 +38,40 @@ export function ToolStatusBadge({ status }: { status: ToolStatus }) {
 
 // One tool call in place in the answer: its name and status, the input it was given and, once it
 // finished, its output. Input and output are plain text, never rendered as Markdown or HTML.
-export function ToolCallRow({ call }: { call: Extract<RunBlock, { kind: 'tool' }> }) {
+// While the call waits for a person its arguments show whole, pretty-printed, in a scroll box the
+// keyboard can reach, and `actions` (the decision buttons) sit below them.
+export function ToolCallRow({
+  call,
+  actions,
+}: {
+  call: Extract<RunBlock, { kind: 'tool' }>
+  actions?: ReactNode
+}) {
+  const waiting = call.status === 'awaiting_approval'
   return (
     <li className="flex max-w-[90%] flex-col gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-4 py-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono font-medium">{call.name}</span>
         <ToolStatusBadge status={call.status} />
       </div>
-      <pre className="font-mono text-xs break-words whitespace-pre-wrap text-muted-foreground">
-        {visibleText(JSON.stringify(call.input))}
-      </pre>
+      {waiting ? (
+        <div
+          role="group"
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scroll box must take focus
+          tabIndex={0}
+          aria-label={`Arguments of ${call.name}`}
+          className="max-h-64 overflow-auto rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <pre className="font-mono text-xs break-words whitespace-pre-wrap">
+            {visibleText(JSON.stringify(call.input, null, 2))}
+          </pre>
+        </div>
+      ) : (
+        <pre className="font-mono text-xs break-words whitespace-pre-wrap text-muted-foreground">
+          {visibleText(JSON.stringify(call.input))}
+        </pre>
+      )}
+      {actions ? <div className="flex flex-col gap-2 sm:flex-row">{actions}</div> : null}
       {call.output === undefined ? null : (
         // A long output scrolls inside its own box, which the keyboard can reach and scroll.
         <div

@@ -53,6 +53,9 @@ import type {
   PatchApiUserMeData,
   PatchApiUserMeErrors,
   PatchApiUserMeResponses,
+  PostApiApprovalByIdDecisionData,
+  PostApiApprovalByIdDecisionErrors,
+  PostApiApprovalByIdDecisionResponses,
   PostApiAuthLoginData,
   PostApiAuthLoginErrors,
   PostApiAuthLoginResponses,
@@ -375,6 +378,29 @@ export const getApiRunByIdEvent = <ThrowOnError extends boolean = false>(
     GetApiRunByIdEventErrors,
     ThrowOnError
   >({ url: '/api/run/{id}/event', ...options })
+
+/**
+ * Approve or reject a waiting tool call
+ */
+export const postApiApprovalByIdDecision = <ThrowOnError extends boolean = false>(
+  options: Options<PostApiApprovalByIdDecisionData, ThrowOnError>,
+): RequestResult<
+  PostApiApprovalByIdDecisionResponses,
+  PostApiApprovalByIdDecisionErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    PostApiApprovalByIdDecisionResponses,
+    PostApiApprovalByIdDecisionErrors,
+    ThrowOnError
+  >({
+    url: '/api/approval/{id}/decision',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  })
 
 /**
  * List sources (admin)

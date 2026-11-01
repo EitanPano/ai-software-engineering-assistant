@@ -1,11 +1,17 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import timedelta
 
 import pytest
 from fastapi import FastAPI
 
+from app.api.run.controller import fail_lost_runs
 from app.infra.dependency import sweep_lost_eval_runs, sweep_lost_runs, sweep_lost_sources
 from app.main import lifespan
+from app.services.db import execute, fetch_all
+from app.services.utils import clock
+from tests.store import reset_store, store_backed
 from tests.support import recording_logger
 
 
@@ -114,6 +120,45 @@ class TestSweepLostEvalRuns:
         assert any(line.startswith("error lost eval run sweep failed") for line in sink.lines), (
             sink.lines
         )
+
+
+@dataclass(frozen=True)
+class _Row:
+    id: str
+    status: str
+
+
+@store_backed
+class TestSweepKeepsAWaitingRun:
+    """V04: a run at `awaiting_approval` has no process to lose, so the boot sweep leaves it."""
+
+    @pytest.fixture(autouse=True)
+    async def empty_store(self) -> None:
+        await reset_store()
+
+    async def test_lists_queued_and_running_runs_only(self) -> None:
+        now = clock.now()
+        for status in ("queued", "running", "awaiting_approval", "completed", "failed"):
+            await execute(
+                "insert into run (id, conversation_id, user_id, status, created_at, updated_at) "
+                "values (%s, %s, 'u', %s, %s, %s)",
+                (status, f"c-{status}", status, now, now),
+            )
+
+        failed = await fail_lost_runs(now + timedelta(seconds=1))
+
+        assert failed == 2
+        statuses = {
+            row.id: row.status
+            for row in await fetch_all(_Row, "select id, status from run order by id")
+        }
+        assert statuses == {
+            "awaiting_approval": "awaiting_approval",
+            "completed": "completed",
+            "failed": "failed",
+            "queued": "failed",
+            "running": "failed",
+        }
 
 
 class TestSweepLostRuns:

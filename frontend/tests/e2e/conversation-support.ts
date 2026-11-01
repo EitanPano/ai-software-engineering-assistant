@@ -22,6 +22,10 @@ export const TEXT = {
   strong: 'done',
   toolName: 'lookup',
   toolDone: 'Tool done.',
+  // The `note` tool of the `fixture` MCP server, seeded at `ask` (backend/tests/seed_ask_tool.py);
+  // the fake asks for it with the arguments `{"text": "hi"}`.
+  askTool: 'fixture__note',
+  askArguments: '"text": "hi"',
 }
 
 export function uniqueToken(): string {

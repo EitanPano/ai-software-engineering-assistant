@@ -319,6 +319,171 @@ describe('the conversation route', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
   })
 
+  describe('a call waiting for approval', () => {
+    const DIGEST = 'c'.repeat(64)
+    const waitingEvents: RunEvent[] = [
+      { type: 'run_started', sequence: 1, createdAt: at },
+      {
+        type: 'tool_call_started',
+        sequence: 2,
+        createdAt: at,
+        toolUseId: 't1',
+        name: 'fixture__note',
+        input: { text: 'hello' },
+      },
+      {
+        type: 'approval_requested',
+        sequence: 3,
+        createdAt: at,
+        approvalId: 'a1',
+        toolUseId: 't1',
+        argumentsDigest: DIGEST,
+      },
+    ]
+    const waitingApi = (extra: Record<string, Response> = {}) =>
+      stubApi({
+        ...ME,
+        'GET /api/conversation/c1': detail(run('awaiting_approval')),
+        'GET /api/conversation/c1/message': page([message('m1', 'user', 'Question')]),
+        'GET /api/run/r1/event': sse(waitingEvents),
+        ...extra,
+      })
+
+    it('shows the arguments and both decisions, keeps send off and announces the wait', async () => {
+      waitingApi()
+
+      renderRoutes('/conversation/c1')
+
+      expect(await screen.findByText('Needs approval')).toBeInTheDocument()
+      const box = screen.getByRole('group', { name: 'Arguments of fixture__note' })
+      expect(box).toHaveTextContent('"text": "hello"')
+      expect(screen.getByRole('button', { name: 'Approve call' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Reject call' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+      expect(screen.queryByText('Agent is working…')).not.toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'The agent is waiting for your approval to call fixture__note.',
+        )
+      })
+    })
+
+    it('sends the decision with the digest, turns both buttons off and reopens the stream', async () => {
+      const fetchMock = waitingApi({
+        'POST /api/approval/a1/decision': Response.json({
+          id: 'a1',
+          toolUseId: 't1',
+          decision: 'approved',
+          decidedAt: at,
+        }),
+      })
+      renderRoutes('/conversation/c1')
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Approve call' }))
+
+      await waitFor(() => {
+        const posts = fetchMock.mock.calls.filter(([request]) => request.method === 'POST')
+        expect(posts).toHaveLength(1)
+      })
+      const post = fetchMock.mock.calls.find(([request]) => request.method === 'POST')?.[0]
+      expect(await post?.json()).toEqual({ decision: 'approved', argumentsDigest: DIGEST })
+      expect(screen.getByRole('button', { name: 'Reject call' })).toBeDisabled()
+      await waitFor(() => {
+        const streams = fetchMock.mock.calls.filter(([request]) =>
+          request.url.endsWith('/api/run/r1/event'),
+        )
+        expect(streams.length).toBeGreaterThan(1)
+      })
+    })
+
+    it('announces each wait afresh when two calls of the same tool wait in turn', async () => {
+      const second: RunEvent[] = [
+        {
+          type: 'tool_call_started',
+          sequence: 4,
+          createdAt: at,
+          toolUseId: 't2',
+          name: 'fixture__note',
+          input: { text: 'again' },
+        },
+        {
+          type: 'approval_requested',
+          sequence: 5,
+          createdAt: at,
+          approvalId: 'a2',
+          toolUseId: 't2',
+          argumentsDigest: 'd'.repeat(64),
+        },
+      ]
+      const decision = (id: string, toolUseId: string, sequence: number): RunEvent => ({
+        type: 'approval_decided',
+        sequence,
+        createdAt: at,
+        approvalId: id,
+        toolUseId,
+        decision: 'rejected',
+      })
+      let call = 0
+      const streams = [
+        [...waitingEvents, ...second],
+        [...waitingEvents, ...second, decision('a1', 't1', 6)],
+        [...waitingEvents, ...second, decision('a1', 't1', 6), decision('a2', 't2', 7)],
+      ]
+      const decided = Response.json({
+        id: 'a1',
+        toolUseId: 't1',
+        decision: 'rejected',
+        decidedAt: at,
+      })
+      stubApi({
+        ...ME,
+        'GET /api/conversation/c1': detail(run('awaiting_approval')),
+        'GET /api/conversation/c1/message': page([message('m1', 'user', 'Question')]),
+        'GET /api/run/r1/event': () => sse(streams[Math.min(call, 2)] ?? []),
+        'POST /api/approval/a1/decision': () => {
+          call = 1
+          return decided.clone()
+        },
+        'POST /api/approval/a2/decision': () => {
+          call = 2
+          return decided.clone()
+        },
+      })
+      renderRoutes('/conversation/c1')
+
+      // The status line is read fresh each time: the loading state has one of its own.
+      const line = () => screen.getByRole('status').textContent
+      await waitFor(() => {
+        expect(line()).toContain('2 tool calls')
+      })
+      const first = line()
+
+      const [firstReject] = await screen.findAllByRole('button', { name: 'Reject call' })
+      await userEvent.click(firstReject as HTMLElement)
+      await waitFor(() => {
+        expect(line()).toContain('to call fixture__note')
+      })
+      expect(line()).not.toBe(first)
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Reject call' }))
+      await waitFor(() => {
+        expect(line()).toBe('')
+      })
+    })
+
+    it('says so in our words when the call was already decided, and keeps the decisions open', async () => {
+      waitingApi({ 'POST /api/approval/a1/decision': envelope('conflict', 409) })
+      renderRoutes('/conversation/c1')
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Reject call' }))
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already decided'))
+      })
+      expect(toast.error).not.toHaveBeenCalledWith(expect.stringContaining('hunter2'))
+    })
+  })
+
   it('shows a down tool server as a notice in the log and goes on to the answer', async () => {
     stubApi({
       ...ME,

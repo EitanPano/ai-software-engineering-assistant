@@ -23,10 +23,21 @@ apart. A marker is `[[name]]` or `[[name:key]]`:
   (`stop_sequence`, `model_context_window_exceeded`, and one the API does not define).
 - `[[empty]]`: `end_turn` with no content at all.
 - `[[parallel]]`: the first call asks for two tools (`lab__first` and `lab__second`) in one turn.
+- `[[trio]]`: the first call asks for `lab__echo`, `lab__lookup` and `lab__loose`, in that order.
+- `[[twice:NAME]]`: asks for NAME with `{"text": "hi"}`, then, after its result, again with
+  `{"text": "hi2"}`, then answers.
+- `[[think]]`: a `thinking` block opens a tool call or an answer. Its signature is a SHA-256 over
+  the request's `system`, its tools sorted by name and the messages before it, and the fake refuses
+  (400) a replayed block whose prefix changed, as the real API does under
+  `prefix_mismatch_behavior: "error"`.
+- `[[fallback_tool:NAME]]`: a `tool_use` of NAME, a `fallback` block, then a `tool_use` of NAME:
+  only the last is served, the first is stored and never run.
 - `[[loop]]`: every call asks for a tool, so the run reaches its turn limit.
 - `[[refuse]]`: `stop_reason: refusal`, no content.
 - `[[truncate]]`: some text, then `stop_reason: max_tokens`.
 - `[[stream_error]]`: some text, then an `overloaded_error` event in the middle of the stream.
+  Beside a first-turn tool marker (`tool`, `trio`...), the tool turn comes first and the turn
+  after its result fails.
 - `[[fallback]]`: a `fallback` block, then the answer from the serving model.
 - `[[research]]`: asks for `knowledge__search` with a semantic query, then with a keyword one, then
   cites `path:start-end` of the first hit in the last tool result, or says the knowledge base holds
@@ -34,22 +45,25 @@ apart. A marker is `[[name]]` or `[[name:key]]`:
   cannot search and calls nothing.
 
 A request is also checked for what the real API refuses: an empty turn, a `tool_use` input that is
-not an object, and a `strict` tool whose schema holds a keyword `strict` does not support or an
-object that is not closed. Each is a 400.
+not an object, a `tool_use` whose next user turn lacks its `tool_result`, a replayed `thinking`
+block whose prefix changed, and a `strict` tool whose schema holds a keyword `strict` does not
+support or an object that is not closed. Each is a 400.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import re
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Final
 
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tests.fixture_repository import KEYWORD_QUERY, SEMANTIC_QUERY
 
@@ -62,6 +76,7 @@ TOOL_DONE: Final = "Tool done."
 SEARCH_TOOL: Final = "knowledge__search"
 RESEARCH_QUERIES: Final = (SEMANTIC_QUERY, KEYWORD_QUERY)
 MANY_CALLS: Final = 14
+TWICE_TEXTS: Final = ("hi", "hi2")
 NO_ANSWER: Final = "The knowledge base holds no answer to that."
 NOT_OFFERED: Final = "I cannot search the knowledge base right now."
 HOLD_TIMEOUT_SECONDS: Final = 30.0
@@ -169,9 +184,70 @@ def request_problem(messages: object) -> str | None:
             if block.get("type") == "tool_use" and not isinstance(block.get("input"), dict):
                 return f"messages.{index}.content: tool_use input must be an object"
         if message.get("role") == "assistant":
-            problem = _fallback_problem(messages, index)
+            problem = _fallback_problem(messages, index) or _unanswered_problem(messages, index)
             if problem is not None:
                 return problem
+    return None
+
+
+def _unanswered_problem(messages: list[object], index: int) -> str | None:
+    """A `tool_use` must be answered by a `tool_result` in the next user turn, which holds one for
+    each of them. The last message may be an assistant turn (a continued `pause_turn`)."""
+    message = messages[index]
+    assert isinstance(message, dict)
+    asked = [
+        str(block.get("id"))
+        for block in _blocks(message.get("content"))
+        if block.get("type") == "tool_use"
+    ]
+    if not asked or index + 1 >= len(messages):
+        return None
+    following = messages[index + 1]
+    answered = (
+        {
+            str(block.get("tool_use_id"))
+            for block in _blocks(following.get("content"))
+            if block.get("type") == "tool_result"
+        }
+        if isinstance(following, dict) and following.get("role") == "user"
+        else set()
+    )
+    missing = [identifier for identifier in asked if identifier not in answered]
+    if missing:
+        return f"messages.{index}: tool_use ids were found without tool_result blocks after them"
+    return None
+
+
+def prefix_signature(system: object, tools: object, preceding: list[object]) -> str:
+    """What a `thinking` block's signature stands for: the system prompt, the tool set (by name)
+    and every message before the turn that holds the block."""
+    ordered = (
+        sorted((t for t in tools if isinstance(t, dict)), key=lambda t: str(t.get("name")))
+        if isinstance(tools, list)
+        else []
+    )
+    encoded = json.dumps([system, ordered, preceding], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def binding_problem(body: Json) -> str | None:
+    """The real API's refusal of a replayed `thinking` block whose prefix is not the one it was
+    signed over (`prefix_mismatch_behavior: "error"`)."""
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return None
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for block in _blocks(message.get("content")):
+            signature = block.get("signature")
+            if block.get("type") == "thinking" and isinstance(signature, str) and signature:
+                expected = prefix_signature(body.get("system"), body.get("tools"), messages[:index])
+                if signature != expected:
+                    return (
+                        f"messages.{index}.content: thinking block signature does not match the "
+                        "system, tools and messages before it"
+                    )
     return None
 
 
@@ -222,6 +298,11 @@ def tool_names_of(tools: object) -> set[str]:
     if not isinstance(tools, list):
         return set()
     return {str(tool["name"]) for tool in tools if isinstance(tool, dict) and "name" in tool}
+
+
+_FIRST_TURN_TOOLS = frozenset(
+    {"tool", "badtool", "stringinput", "nulinput", "many", "parallel", "trio", "fallback_tool"}
+)
 
 
 def markers_of(text: str) -> dict[str, str]:
@@ -373,12 +454,62 @@ async def _research(results: list[str], offered: set[str]) -> AsyncIterator[byte
         yield part
 
 
+def _fallback_block(index: int, model: str) -> list[bytes]:
+    return [
+        _event(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {
+                    "type": "fallback",
+                    "from": {"model": model},
+                    "to": {"model": "claude-opus-4-8"},
+                    "trigger": {"type": "refusal"},
+                },
+            },
+        ),
+        _stop(index),
+    ]
+
+
+def _thinking(index: int, signature: str) -> list[bytes]:
+    return [
+        _event(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+            },
+        ),
+        _event(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": index,
+                "delta": {"type": "thinking_delta", "thinking": "Considering the request."},
+            },
+        ),
+        _event(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": index,
+                "delta": {"type": "signature_delta", "signature": signature},
+            },
+        ),
+        _stop(index),
+    ]
+
+
 async def script(
     model: str,
     text: str,
     continuation: bool,
     results: list[str] | None = None,
     offered: set[str] | None = None,
+    signature: str = "",
 ) -> AsyncIterator[bytes]:
     marks = markers_of(text)
     yield _message_start(model)
@@ -388,7 +519,9 @@ async def script(
             yield part
         return
 
-    if "stream_error" in marks:
+    # With a tool marker beside it, the first turn asks for the tool and the turn after its result
+    # is the one that fails: a model failure on the turn after a resume.
+    if "stream_error" in marks and (continuation or not marks.keys() & _FIRST_TURN_TOOLS):
         async for part in _chunks(0, ANSWER_CHUNKS[:1]):
             yield part
         yield _event(
@@ -432,13 +565,31 @@ async def script(
             yield part
         return
 
-    wants_tool = ("loop" in marks) or (
-        not continuation
-        and bool({"tool", "badtool", "stringinput", "nulinput", "many", "parallel"} & marks.keys())
+    done = len(results or [])
+    twice = "twice" in marks and done < len(TWICE_TEXTS)
+    wants_tool = (
+        ("loop" in marks) or twice or (not continuation and bool(_FIRST_TURN_TOOLS & marks.keys()))
     )
     if wants_tool:
         calls: list[tuple[str, object]]
-        if "parallel" in marks:
+        base = 0
+        if "think" in marks:
+            for part in _thinking(0, signature):
+                yield part
+            base = 1
+        if twice:
+            calls = [(marks["twice"], {"text": TWICE_TEXTS[done]})]
+        elif "trio" in marks:
+            calls = [(f"lab__{name}", {"text": "a"}) for name in ("echo", "lookup", "loose")]
+        elif "fallback_tool" in marks:
+            name = marks["fallback_tool"]
+            for part in _tool_use(base, name, _arguments_for(name)):
+                yield part
+            for part in _fallback_block(base + 1, model):
+                yield part
+            base += 2
+            calls = [(name, _arguments_for(name))]
+        elif "parallel" in marks:
             calls = [("lab__first", {"text": "a"}), ("lab__second", {"text": "b"})]
         elif "stringinput" in marks:
             calls = [(marks["stringinput"], "this is not an object")]
@@ -452,7 +603,7 @@ async def script(
             name = marks.get("tool") or "lookup"
             calls = [(name, _arguments_for(name))]
         for index, (name, arguments) in enumerate(calls):
-            for part in _tool_use(index, name, arguments):
+            for part in _tool_use(base + index, name, arguments):
                 yield part
         for part in _message_end("tool_use"):
             yield part
@@ -460,21 +611,13 @@ async def script(
 
     index = 0
     if "fallback" in marks:
-        yield _event(
-            "content_block_start",
-            {
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {
-                    "type": "fallback",
-                    "from": {"model": model},
-                    "to": {"model": "claude-opus-4-8"},
-                    "trigger": {"type": "refusal"},
-                },
-            },
-        )
-        yield _stop(0)
+        for part in _fallback_block(0, model):
+            yield part
         index = 1
+    if "think" in marks:
+        for part in _thinking(index, signature):
+            yield part
+        index += 1
     if continuation:
         chunks: tuple[str, ...] = (TOOL_DONE,)
     elif "hold" in marks:
@@ -498,20 +641,28 @@ async def messages(request: Request) -> Response:
     body = await request.json()
     if not isinstance(body, dict):
         return JSONResponse({"type": "error", "error": {"type": "invalid_request_error"}}, 400)
-    problem = request_problem(body.get("messages")) or tool_problem(body.get("tools"))
+    problem = (
+        request_problem(body.get("messages"))
+        or tool_problem(body.get("tools"))
+        or binding_problem(body)
+    )
     if problem is not None:
         return JSONResponse(
             {"type": "error", "error": {"type": "invalid_request_error", "message": problem}}, 400
         )
     text, continuation = script_text(body.get("messages"))
     model = body.get("model")
+    sent = body.get("messages")
     return StreamingResponse(
         script(
             model if isinstance(model, str) else "fake",
             text,
             continuation,
-            tool_results_of(body.get("messages")),
+            tool_results_of(sent),
             tool_names_of(body.get("tools")),
+            prefix_signature(
+                body.get("system"), body.get("tools"), sent if isinstance(sent, list) else []
+            ),
         ),
         media_type="text/event-stream",
     )
@@ -536,10 +687,36 @@ app: Final = Starlette(
 )
 
 
+def with_note_server(note: Callable[[Scope, Receive, Send], Awaitable[None]]) -> ASGIApp:
+    """The fake plus the `fixture` MCP server at `/mcp` (`tests/fake_note.py`), in one process: the
+    lifespan enters the server's, `/mcp` and `/health` of the server go to it, the rest to the
+    fake. `note` is a `McpApp`, whose own `lifespan()` the fake needs while it serves."""
+
+    async def serve(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "lifespan":
+            async with note.lifespan():  # type: ignore[attr-defined]
+                while True:
+                    message = await receive()
+                    if message["type"] == "lifespan.startup":
+                        await send({"type": "lifespan.startup.complete"})
+                    elif message["type"] == "lifespan.shutdown":
+                        await send({"type": "lifespan.shutdown.complete"})
+                        return
+        elif scope["type"] == "http" and scope["path"] == "/mcp":
+            await note(scope, receive, send)
+        else:
+            await app(scope, receive, send)
+
+    return serve
+
+
 def main(environ: Mapping[str, str] = os.environ) -> None:
     import uvicorn  # only the e2e entry starts a server
 
-    uvicorn.run(app, host="127.0.0.1", port=int(environ.get("FAKE_ANTHROPIC_PORT", "8101")))
+    from tests.fake_note import create_note_app  # loads the app's MCP seam, so not at import
+
+    port = int(environ.get("FAKE_ANTHROPIC_PORT", "8101"))
+    uvicorn.run(with_note_server(create_note_app(port)), host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

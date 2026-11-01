@@ -8,6 +8,7 @@ mounted routers, so there is no registration list.
 
 from fastapi import FastAPI
 
+from app.api.approval.routes import router as approval_router
 from app.api.auth.routes import router as auth_router
 from app.api.conversation.routes import router as conversation_router
 from app.api.eval.routes import router as eval_router
@@ -24,6 +25,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(user_router, prefix="/api/user")
     app.include_router(conversation_router, prefix="/api/conversation")
     app.include_router(run_router, prefix="/api/run")
+    app.include_router(approval_router, prefix="/api/approval")
     app.include_router(source_router, prefix="/api/source")
     app.include_router(search_router, prefix="/api/search")
     app.include_router(eval_router, prefix="/api/eval-run")

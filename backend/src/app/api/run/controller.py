@@ -27,9 +27,15 @@ from app.api.run.schema import (
 )
 from app.config.constants import AGENT_POLL_MS, AGENT_STREAM_MAX_SECONDS, EVENT_BATCH_LIMIT
 from app.middleware.auth import require_caller
+from app.models.approval.enums import ApprovalDecision
+from app.models.approval.interface import ApprovalCall, ApprovalRecord
+from app.models.approval.type import DecidedApproval, HeldCall
+from app.models.auth.type import Caller
 from app.models.run.enums import RunErrorCode, RunEventType, RunStatus, ToolCallStatus
-from app.models.run.interface import RunEventRecord, RunRecord, ToolCallRecord
+from app.models.run.interface import PendingTurn, RunEventRecord, RunRecord, ToolCallRecord
+from app.services import tool
 from app.services.logger import log
+from app.services.security.crypto import constant_time_equals
 from app.services.utils import clock
 from app.services.utils.error import AppError
 
@@ -54,6 +60,8 @@ def _wire_status(status: RunStatus) -> RunStatusName:
             return "queued"
         case RunStatus.running:
             return "running"
+        case RunStatus.awaiting_approval:
+            return "awaiting_approval"
         case RunStatus.completed:
             return "completed"
         case RunStatus.failed:
@@ -167,8 +175,144 @@ async def record_tool_call(
 
 
 async def count_tool_calls(run_id: str) -> int:
-    """System operation: how many tool calls the run has recorded, denied ones included."""
+    """System operation: how many tool calls the run has recorded, denied and waiting ones
+    included."""
     return await service.count_tool_calls(run_id)
+
+
+async def pause_run(
+    run: RunRecord,
+    *,
+    content: list[dict[str, object]],
+    results: list[dict[str, object]],
+    held: list[HeldCall],
+) -> None:
+    """System operation: stops a running run at `awaiting_approval`, in one transaction. A waiting
+    `tool_call` and an `approval` for each held call (the digest is over the arguments as the store
+    reads them back), an `approval_requested` event for each, the status and the pending turn
+    (`content` is the assistant turn whole, `results` the answers already known). A crash leaves
+    all of it or none, so a pause is never half written. No process waits afterwards."""
+    pending = PendingTurn(content=content, results=results)
+    async with _writer(run.id):
+
+        async def work(db: service.Tx) -> None:
+            now = clock.now()
+            for call in held:
+                call_id = str(uuid.uuid4())
+                stored = await service.insert_waiting_call(
+                    ToolCallRecord(
+                        id=call_id,
+                        run_id=run.id,
+                        tool_use_id=call.tool_use_id,
+                        mcp_server_id=call.mcp_server_id,
+                        tool_name=call.tool_name,
+                        arguments=call.arguments,
+                        result="",
+                        status=ToolCallStatus.awaiting_approval,
+                        created_at=now,
+                    ),
+                    db=db,
+                )
+                approval = ApprovalRecord(
+                    id=str(uuid.uuid4()),
+                    run_id=run.id,
+                    tool_call_id=call_id,
+                    user_id=run.user_id,
+                    arguments_digest=tool.arguments_digest(stored),
+                    decision=None,
+                    created_at=now,
+                    decided_at=None,
+                )
+                await service.insert_approval(approval, db=db)
+                await _append(
+                    run.id,
+                    RunEventType.approval_requested,
+                    {
+                        "approvalId": approval.id,
+                        "toolUseId": call.tool_use_id,
+                        "argumentsDigest": approval.arguments_digest,
+                    },
+                    db=db,
+                )
+            if not await service.mark_awaiting_approval(run.id, pending, now, db=db):
+                raise RuntimeError("the run is not running")
+
+        await service.with_transaction(work)
+    _WRITERS.pop(run.id, None)
+
+
+async def decide_tool_call(
+    approval_id: str,
+    *,
+    decision: ApprovalDecision,
+    arguments_digest: str,
+    caller: Caller,
+) -> DecidedApproval:
+    """Records a person's decision on a waiting call. Another user's approval is a 404, an admin's
+    included; a digest that is not the one the person was shown, a decision already made and a run
+    that no longer waits are each a 409 that changes nothing. The decision, its `approval_decided`
+    event and, for the last one, the flip back to `running` commit together; the run row is locked
+    first, so two concurrent last decisions take turns and exactly one flips it."""
+    found = await service.find_approval_call(approval_id)
+    if found is None or found.approval.user_id != caller.id:
+        raise AppError("not_found", "approval not found")
+    approval = found.approval
+    if not constant_time_equals(arguments_digest, approval.arguments_digest):
+        raise AppError("conflict", "the arguments are not the ones that were shown")
+    async with _writer(approval.run_id):
+
+        async def work(db: service.Tx) -> DecidedApproval:
+            if (
+                await service.lock_run_status(approval.run_id, db=db)
+                is not RunStatus.awaiting_approval
+            ):
+                raise AppError("conflict", "the run is not waiting for a decision")
+            now = clock.now()
+            if not await service.decide_approval(approval.id, decision, now, db=db):
+                raise AppError("conflict", "the tool call was already decided")
+            await _append(
+                approval.run_id,
+                RunEventType.approval_decided,
+                {
+                    "approvalId": approval.id,
+                    "toolUseId": found.tool_use_id,
+                    "decision": decision.value,
+                },
+                db=db,
+            )
+            resumes = await service.count_undecided(
+                approval.run_id, db=db
+            ) == 0 and await service.mark_running_again(approval.run_id, now, db=db)
+            return DecidedApproval(
+                id=approval.id,
+                run_id=approval.run_id,
+                tool_use_id=found.tool_use_id,
+                decision=decision,
+                decided_at=now,
+                resumes=resumes,
+            )
+
+        return await service.with_transaction(work)
+
+
+async def claim_pending_turn(run_id: str) -> PendingTurn | None:
+    """System operation: takes what a paused run kept for its resume, once. None when the run is
+    not running or the turn was already taken (a redelivery, or a run a sweep ended)."""
+    return await service.claim_pending_turn(run_id)
+
+
+async def list_approval_calls(run_id: str) -> list[ApprovalCall]:
+    """System operation: every approval of the run, decided or not, rejected ones included, with
+    the calls they bind, oldest first. Not a filter: the resume answers a rejection too."""
+    return await service.list_approval_calls(run_id)
+
+
+async def end_waiting_call(
+    run_id: str, tool_use_id: str, status: ToolCallStatus, result: str
+) -> bool:
+    """System operation: ends a call that waited for a person with the text the model gets back;
+    false when it had already ended."""
+    return await service.finish_tool_call(run_id, tool_use_id, status, result)
 
 
 async def start_run(run_id: str) -> bool:
@@ -245,16 +389,17 @@ async def stream_run_event(
     run: Annotated[RunRecord, Depends(_owned_run)],
     last_event_id: Annotated[EventSequence | None, Header(alias="Last-Event-ID")] = None,
 ) -> AsyncIterable[RunEvent]:
-    """The events after `Last-Event-ID`, in order and once each, polling until `run_finished`.
-    Whether the run is finished is read before the events are: the status and `run_finished`
-    commit together, so a finished run's events are all visible by then.
+    """The events after `Last-Event-ID`, in order and once each, polling until `run_finished` or
+    until the run waits for a person's decision. Whether the run is at rest (finished, or at
+    `awaiting_approval`) is read before the events are: the status commits with the last event it
+    follows, so a run at rest has all its events visible by then.
 
     The stream ends cleanly after `AGENT_STREAM_MAX_SECONDS`, `run_finished` or not, so one open
     cannot hold the pool for long; the client reopens with `Last-Event-ID` and carries on."""
     cursor = 0 if last_event_id is None else last_event_id
     deadline = clock.now() + timedelta(seconds=AGENT_STREAM_MAX_SECONDS)
     while clock.now() < deadline:
-        finished = await service.is_finished(run.id)
+        at_rest = await service.is_at_rest(run.id)
         events = await service.list_events_after(run.id, cursor, EVENT_BATCH_LIMIT)
         for record in events:
             cursor = record.sequence
@@ -265,6 +410,6 @@ async def stream_run_event(
             if record.type is RunEventType.run_finished:
                 return
         if not events:
-            if finished:
+            if at_rest:
                 return
             await asyncio.sleep(AGENT_POLL_MS / 1000)

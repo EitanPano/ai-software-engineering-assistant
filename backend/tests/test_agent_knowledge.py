@@ -379,9 +379,8 @@ class TestToolPolicy:
         [
             (None, None),  # no policy row
             (PolicyEffect.deny, PolicyEffect.allow),
-            (PolicyEffect.ask, PolicyEffect.allow),
         ],
-        ids=["no row", "deny", "ask"],
+        ids=["no row", "deny"],
     )
     async def test_a_call_without_an_allow_is_denied_recorded_and_never_reaches_the_server(
         self,
@@ -404,6 +403,23 @@ class TestToolPolicy:
         ]
         assert finish_of(frames).event["status"] == "completed"
         assert fake_model.requests
+
+    async def test_an_ask_call_is_held_for_a_person_and_never_reaches_the_server(
+        self,
+        client: httpx.AsyncClient,
+        fake_model: RecordingFake,
+        servers: Servers,
+    ) -> None:
+        """Plan 010 denied `ask` like `deny`; since plan 011 it waits (`test_agent_approval.py`
+        holds the whole behaviour). What stays: the server is not reached."""
+        await servers.register_lab({"echo": PolicyEffect.ask})
+        journey = Journey(client)
+
+        run_id, frames = await journey.run("[[tool:lab__echo]]")
+
+        assert types_of(frames) == ["run_started", "tool_call_started", "approval_requested"]
+        assert servers.lab.calls == []
+        assert [c.status for c in await calls_of(run_id)] == ["awaiting_approval"]
 
     async def test_a_disabled_server_is_denied_and_a_name_no_server_offers_too(
         self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers

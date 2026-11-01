@@ -164,11 +164,13 @@ def _subscribers() -> Sequence[SubscriberEntry]:
     from app.infra.subscribers.execute_eval_run import execute_eval_run_on_queued
     from app.infra.subscribers.execute_run import execute_run_on_created
     from app.infra.subscribers.index_source import index_source_on_queued
+    from app.infra.subscribers.resume_run import resume_run_on_resumed
     from app.infra.subscribers.send_welcome import send_welcome
 
     return [
         send_welcome,
         execute_run_on_created,
+        resume_run_on_resumed,
         index_source_on_queued,
         execute_eval_run_on_queued,
     ]

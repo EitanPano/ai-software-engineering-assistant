@@ -369,6 +369,13 @@ tests.fake_anthropic` from `backend/` on port 8101, before the API, and points t
   stderr, and its info lines would crowd the 12-line tail. `knowledge.spec.ts` (an admin connects
   the fixture, sends `MARKER.research`, reads two tool rows and the cited answer) registers
   nothing under `E2E_BASE_URL`.
+- **The approval tool.** The API's command is `e2e-db`, then `uv run python -m
+tests.seed_ask_tool`, then `app.main`: `e2e-db`'s restore deletes the last run's `fixture` MCP
+  server row, so the seed (the `fixture` server, served from the Anthropic fake's process, with its
+  `note` tool at `ask`) comes after it, and `playwright-config.test.ts` holds the order. No
+  seventh web server starts, so `LINES_PER_SERVER` stays. `approval.spec.ts` sends
+  `MARKER.tool('fixture__note')`, reads the arguments, reloads, then approves or rejects, and
+  registers nothing under `E2E_BASE_URL`.
 - **The staff group.** `/source` and `/source/connect` sit in a pathless admin group in
   `routes.tsx`, each loader calling `requireRole(queryClient, 'admin')`. Their e2e accounts are
   promoted by `grantAdmin` (`tests/e2e/source-support.ts`), which runs the server's `grant_admin`
@@ -388,6 +395,14 @@ tests.fake_anthropic` from `backend/` on port 8101, before the API, and points t
   `Last-Event-ID`, bounded on consecutive connections that bring nothing new. `entity/run/model.ts`
   folds events into a view and ignores a `sequence` it has seen. Unit tests stub `fetch` with an
   SSE `Response`. Assistant text renders only through `shared/ui/markdown.tsx` (no raw HTML).
+  **Approvals.** A tool call waits as `awaiting_approval`, with the `approvalId` and
+  `argumentsDigest` a decision echoes. The server closes a stream cleanly at a pause, so `streamRun`
+  tracks undecided approvals and returns `paused` instead of reopening (a reopen at its delay would
+  spend `run_stream_per_user` in seconds); `useRunStream` exposes `paused` and `retry` reopens it
+  after a decision, and after a 409 too, so a tab another tab decided for catches up.
+  `feature/approve` and `feature/reject` are paid-start mutations (`retry: false`, `networkMode:
+'always'`), each sent by a click only; the waiting row shows the whole arguments in a focusable
+  scroll box, and send stays off until the run is done.
 - **Projects.** `phone` (`devices['Pixel 7']`, touch) runs every journey with its axe scan;
   `desktop` (`devices['Desktop Chrome']`) runs `shell.spec.ts` and `screens.spec.ts`. A check that
   belongs to one of them is tagged `{ tag: '@phone' }` or `{ tag: '@desktop' }` and the other

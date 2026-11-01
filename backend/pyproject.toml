@@ -148,6 +148,7 @@ layers = [
 ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.send_welcome",
   "app.infra.pubsub -> app.infra.subscribers.execute_run",
+  "app.infra.pubsub -> app.infra.subscribers.resume_run",
   "app.infra.pubsub -> app.infra.subscribers.index_source",
   "app.infra.pubsub -> app.infra.subscribers.execute_eval_run",
   # The boot sweeps import the run, source and eval rules inside their functions, after every
@@ -702,6 +703,7 @@ modules = ["app.api.*"]
 ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.send_welcome",
   "app.infra.pubsub -> app.infra.subscribers.execute_run",
+  "app.infra.pubsub -> app.infra.subscribers.resume_run",
   "app.infra.pubsub -> app.infra.subscribers.index_source",
   "app.infra.pubsub -> app.infra.subscribers.execute_eval_run",
   "app.infra.dependency -> app.api.run.controller",

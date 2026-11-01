@@ -16,9 +16,10 @@ from app.api.run import controller as run_controller
 from app.models.conversation.type import ConversationPrefix
 from app.models.run.enums import ToolCallStatus
 from app.models.tool_policy.enums import PolicyEffect
+from app.services.anthropic import Block
 from app.services.db import execute, fetch_all
 from tests import fake_anthropic, fake_voyage
-from tests.agent_support import RecordingFake
+from tests.agent_support import RecordingFake, bearer, send, start_conversation
 from tests.fake_mcp import KNOWLEDGE_HOST, Servers
 from tests.fake_mcp import mcp_servers as mcp_servers
 from tests.knowledge_support import index_fixture
@@ -156,15 +157,19 @@ class TestKnowledgePolicy:
         assert finish_of(frames).event["status"] == "completed"
         assert fake_model.requests
 
-    @pytest.mark.parametrize("effect", ["ask", "deny"])
+    # Plan 011 changed `ask`: it used to be denied like `deny`, now the call waits for a person
+    # (`awaiting_approval`). Neither reaches the server, so neither embeds.
+    @pytest.mark.parametrize(
+        ("effect", "status"), [("ask", "awaiting_approval"), ("deny", "denied")]
+    )
     async def test_ask_and_deny_on_search_never_embed(
-        self, client: httpx.AsyncClient, fake_model: RecordingFake, effect: str
+        self, client: httpx.AsyncClient, fake_model: RecordingFake, effect: str, status: str
     ) -> None:
         await execute("update tool_policy set effect = %s", (effect,))
 
         run_id, _ = await Journey(client).run("[[research]]")
 
-        assert {r.status for r in await rows_of(run_id)} == {"denied"}
+        assert {r.status for r in await rows_of(run_id)} == {status}
         assert fake_voyage.state.requests == []
         assert fake_model.requests
 
@@ -247,11 +252,33 @@ class TestOddNames:
             "knowledge__search__extra",
         ],
     )
-    async def test_an_odd_name_is_denied_not_raised(self, name: str) -> None:
-        call = await agent._run_tool(name, {"query": "q"}, self.PREFIX)
+    async def test_an_odd_name_is_denied_not_raised(
+        self, client: httpx.AsyncClient, name: str
+    ) -> None:
+        run_id = await self.call_run(client)
 
-        assert call.status is ToolCallStatus.denied
+        await self.call(run_id, name)
+
+        assert [row.status for row in await rows_of(run_id)] == [ToolCallStatus.denied.value]
         assert fake_voyage.state.requests == []
+
+    @staticmethod
+    async def call_run(client: httpx.AsyncClient) -> str:
+        """A real run, so the loop's own `_call_tool` can write its events and its row."""
+        headers = bearer()
+        conversation = await start_conversation(client, headers)
+        return await send(client, headers, conversation, "hello")
+
+    async def call(self, run_id: str, name: str) -> None:
+        block: Block = {
+            "type": "tool_use",
+            "id": "toolu_odd",
+            "name": name,
+            "input": {"query": "q"},
+        }
+        answer = await agent._call_tool(run_id, block, self.PREFIX, allowed=True)
+        assert isinstance(answer, dict)
+        assert answer["is_error"] is True
 
     @pytest.mark.parametrize(
         "nested", [{"a": ["x\x00"]}, {"a\x00": 1}, {"a": {"b": [{"c": "\x00"}]}}]
@@ -262,10 +289,14 @@ class TestOddNames:
     def test_an_input_without_nul_is_clean(self) -> None:
         assert not agent._holds_nul({"a": ["x", {"b": "ü\n\t"}], "c": None, "d": 1})
 
-    async def test_a_prefix_that_never_offered_the_tool_denies_even_with_an_allow_row(self) -> None:
-        call = await agent._run_tool("knowledge__search", {"query": "q"}, self.PREFIX)
+    async def test_a_prefix_that_never_offered_the_tool_denies_even_with_an_allow_row(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        run_id = await self.call_run(client)
 
-        assert call.status is ToolCallStatus.denied
+        await self.call(run_id, "knowledge__search")
+
+        assert [row.status for row in await rows_of(run_id)] == [ToolCallStatus.denied.value]
         assert fake_voyage.state.requests == []
 
 

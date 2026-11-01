@@ -205,6 +205,22 @@ async def freeze_prefix(
     return prefix
 
 
+async def read_prefix(conversation_id: str) -> ConversationPrefix:
+    """System operation: the prompt and tools a conversation was bound to at its first run, with no
+    freezing. A resume replays them unchanged (a thinking block is bound to both); it lists no
+    server, so it has nothing to freeze."""
+    prefix = await service.find_prefix(conversation_id)
+    if prefix is None:
+        raise RuntimeError("conversation has no stored prefix")
+    return prefix
+
+
+async def count_assistant_turns(conversation_id: str, run_id: str) -> int:
+    """System operation: the assistant turns a run has stored in its conversation, which is how
+    many of its `AGENT_MAX_TURNS` it has spent."""
+    return await service.count_assistant_turns(conversation_id, run_id)
+
+
 async def append_turns(conversation_id: str, run_id: str, turns: list[NewTurn]) -> None:
     """System operation: stores the turns of one model call together (an assistant turn, and the
     `tool_result` turn answering its tool calls), in one transaction, so a stored `tool_use`

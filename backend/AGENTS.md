@@ -85,9 +85,11 @@ src/app/
                       repositories and their index; search: hybrid search over the ready
                       chunks, a controller only, the chunks being the source module's; see Search;
                       eval: admin-run retrieval measurements, see Evals;
+                      approval: routes, schema and controller only, its rows are the run
+                      module's, see The agent;
                       mcp_server, tool_policy: controller and service, no route, see The agent)
   models/<name>/      interface · type · enums · constants (auth, session, user,
-                      conversation, run, source, search, eval, mcp_server, tool_policy)
+                      conversation, run, approval, source, search, eval, mcp_server, tool_policy)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
                       asgi (helpers the ASGI middleware share)
@@ -99,7 +101,7 @@ src/app/
     utils/            error · openapi · clock · api_model · pagination · postgres_error · retrieval_metric (pure, no I/O)
   infra/              dependency.py · loop.py · memory.py · postgres.py · pubsub.py · scheduler.py
     jobs/             one file per background job: session_cleanup
-    subscribers/      one file per event reaction: send_welcome, execute_run, index_source, execute_eval_run
+    subscribers/      one file per event reaction: send_welcome, execute_run, resume_run, index_source, execute_eval_run
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
     scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals), mcp_seed.py (restores the rows `0009-mcp-server.sql` seeds; the e2e preparation and the test reset call it. The one exception to "a script reaches a module only through its controller": it deletes from `tool_policy` and `mcp_server` through `services/db`, so it refuses unless `current_database()` ends in `_test` or `_e2e`)
     eval_cases/       the labelled case files the seed reads (click-8.5.0.json)
@@ -397,9 +399,10 @@ changes only by plan.
   appended through one writer per run so sequences commit in order; the stream polls the table.
 - `services/anthropic.py` is the only importer of the SDK; `services/mcp.py` the only importer of
   `mcp` (our client and the `knowledge` server, Streamable HTTP, never Anthropic's connector);
-  `services/tool.py` is the default-deny seam (`decide`: only an `allow` policy row runs, so no
-  row, `deny` and `ask` all refuse; `validate_input` checks a call against the JSON Schema it was
-  offered with, naming fields and never values). A run lost with its process ends as
+  `services/tool.py` is the default-deny seam (`decide`: `allow` runs, `ask` waits for a person,
+  no row and `deny` refuse; `validate_input` checks a call against the JSON Schema it was
+  offered with, naming fields and never values; `arguments_digest` is the SHA-256 of the canonical
+  arguments an approval binds to). A run lost with its process ends as
   `interrupted` in `sweep_lost_runs` (`infra/dependency.py`), called by `main.py`'s lifespan once
   every resource is connected.
 - Tools. `execute_run` writes `run_started`, then `api/mcp_server/controller.py ›
@@ -415,6 +418,29 @@ changes only by plan.
   most `AGENT_TOOL_CALLS_PER_RUN` calls, counted from its `tool_call` rows before the turn's calls
   start; the rest are a fixed `is_error` result and no server call. An input holding NUL fails the
   run (JSONB cannot store it) before anything is started.
+- Approvals. A call whose policy is `ask` and that passes the other gates (an enabled server, an
+  offered tool, a valid input) is held: the other calls of the turn run at once, then `pause_run`
+  (`api/run/controller.py`) commits in one transaction a `tool_call` row at `awaiting_approval`
+  (`result` `''`), an `approval` row with `arguments_digest` and an `approval_requested` event for
+  each held call, the run's `awaiting_approval` status and `run.pending_turn` (the assistant turn
+  whole and the results already known; never `message`, which must not hold an unanswered
+  `tool_use`). No process waits; a stream closes once a run at rest has delivered its events
+  (`is_at_rest`); the sweep lists `queued` and `running` only, so a pause survives a restart. A
+  call that fails a gate, or sits past the budget by position, is answered with no question.
+  `POST /api/approval/{id}/decision` (`api/approval/`, `require_auth`, owner only: another user's
+  or an admin's is a 404) calls `api/run/controller.py › decide_tool_call`: the digest must be the
+  one shown, then under a lock on the run row the decision, its `approval_decided` event and, for
+  the last undecided one, the flip to `running`; any stale case is a 409. The approval
+  controller then publishes `run.resumed` (`infra/subscribers/resume_run.py` calls `agent ›
+  resume_run`). `resume_run` first claims `run.pending_turn` in one statement (a running run that
+  still holds one; it is null afterwards), so a redelivery or a run a sweep ended claims nothing and
+  does nothing. The resume answers a rejection with its own fixed text (`_REJECTED_OUTPUT`, apart
+  from the policy's), re-checks each approved call (the digest of the stored arguments, then the
+  gates, so a later `deny` or a disabled server denies) and runs it once from the stored
+  arguments, stores the paused turn and the answers as two turns in one transaction, and goes on
+  with `AGENT_MAX_TURNS` less the assistant turns already stored; `count_tool_calls` counts every
+  row, so both budgets hold across a pause. A run lost after the last decision ends `interrupted`
+  and its approved tool never runs at boot. A person's reason is not stored.
 - The prefix. `conversation.system_prompt` and `conversation.tool_definition` are written once at a
   conversation's first run (a conditional update, then read back, so every request sends the same
   bytes) and replayed: a thinking block is bound to `system`, `tools` and every earlier message,
@@ -435,6 +461,15 @@ changes only by plan.
   `ANTHROPIC_BASE_URL` points the API at it). `tests/agent_support.py` reaches it in process.
   `tests/fake_mcp.py` serves the real `knowledge` and a scripted `lab` server in process through
   `services/mcp.py › use_transport`; a host that is not served answers 503, which is "down".
+  `[[trio]]`, `[[twice:NAME]]`, `[[think]]` and `[[fallback_tool:NAME]]` script the approval
+  journeys (the fake signs a thinking block over `system`, the sorted `tools` and the messages
+  before it, and refuses a replayed block whose prefix changed and a `tool_use` without its
+  `tool_result`). `tests/approval_support.py` pauses, decides and resumes in process (the bus is
+  not connected in a test). Across processes, where `use_transport` cannot reach, `fixture` is a
+  one-tool server (`note { text }`, `tests/fake_note.py`) served at `/mcp` by the
+  `python -m tests.fake_anthropic` process; `python -m tests.seed_ask_tool` (e2e database only)
+  and `seed_ask_tool.seed` write its row and its `ask` policy, after `restore_seed`, which deletes
+  it. `tests/test_approval_restart.py` kills a real API process during a pause.
   `tests/knowledge_support.py` calls `knowledge` directly. The seeded `mcp_server` and
   `tool_policy` rows survive `reset_store()` (restored from the migration's own statements by
   `infra/scripts/mcp_seed.py`) and the e2e preparation.

@@ -13,7 +13,7 @@ from pydantic import Field, RootModel
 
 from app.services.utils.api_model import ResponseModel, Timestamp
 
-type RunStatusName = Literal["queued", "running", "completed", "failed"]
+type RunStatusName = Literal["queued", "running", "awaiting_approval", "completed", "failed"]
 type RunErrorCodeName = Literal[
     "refused", "truncated", "turn_limit", "upstream_unavailable", "interrupted", "internal"
 ]
@@ -72,6 +72,24 @@ class McpServerUnavailableEvent(ResponseModel):
     name: str
 
 
+class ApprovalRequestedEvent(ResponseModel):
+    type: Literal["approval_requested"] = "approval_requested"
+    sequence: int
+    created_at: Timestamp
+    approval_id: str
+    tool_use_id: str
+    arguments_digest: str
+
+
+class ApprovalDecidedEvent(ResponseModel):
+    type: Literal["approval_decided"] = "approval_decided"
+    sequence: int
+    created_at: Timestamp
+    approval_id: str
+    tool_use_id: str
+    decision: Literal["approved", "rejected"]
+
+
 class RunFinishedEvent(ResponseModel):
     type: Literal["run_finished"] = "run_finished"
     sequence: int
@@ -88,6 +106,8 @@ class RunEvent(
             | ToolCallStartedEvent
             | ToolCallFinishedEvent
             | McpServerUnavailableEvent
+            | ApprovalRequestedEvent
+            | ApprovalDecidedEvent
             | RunFinishedEvent,
             Field(discriminator="type"),
         ]

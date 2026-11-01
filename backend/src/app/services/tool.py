@@ -1,15 +1,20 @@
 """The agent's tool seam: how a listed tool becomes a definition the model is offered, what the
 model calls it, whether a policy lets a call run, and whether its input matches the tool's schema.
 
-`decide` is the default-deny gate (`.doc/conventions.md`, Agent security): a call runs only when its
-policy row says `allow`, so no row, `deny` and `ask` (which waits for an approval no task has built
-yet) all refuse. The model's request never changes that; the browser never sees it. The policy is
-read at each call, so a definition stored earlier never outranks it.
+`decide` is the default-deny gate (`.doc/conventions.md`, Agent security): a call runs at once only
+when its policy row says `allow`; `ask` waits for a person's approval, and no row or `deny` refuses.
+The model's request never changes that; the browser never sees it. The policy is read at each call,
+so a definition stored earlier never outranks it.
+
+`arguments_digest` is what an approval binds to: the SHA-256 of the call's arguments, canonical so
+the same value always gives the same digest.
 
 Definitions are sorted by name and built the same way every time, so the tools part of the prompt
 is byte-stable and the cache does not miss silently. A tool is offered as `<server>__<tool>`.
 """
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from typing import Final, Literal
 
@@ -21,7 +26,7 @@ from referencing.exceptions import Unresolvable
 from app.models.mcp_server.type import ListedTool
 from app.models.tool_policy.enums import PolicyEffect
 
-type Decision = Literal["allow", "deny"]
+type Decision = Literal["allow", "ask", "deny"]
 type ToolDefinition = dict[str, object]
 
 SEPARATOR: Final = "__"
@@ -32,8 +37,22 @@ class InvalidToolInput(ValueError):  # noqa: N818  # a value error that names wh
 
 
 def decide(effect: PolicyEffect | None) -> Decision:
-    """Deny unless a policy row says `allow`."""
-    return "allow" if effect is PolicyEffect.allow else "deny"
+    """Deny unless a policy row says `allow` or `ask`."""
+    match effect:
+        case PolicyEffect.allow:
+            return "allow"
+        case PolicyEffect.ask:
+            return "ask"
+        case _:
+            return "deny"
+
+
+def arguments_digest(arguments: Mapping[str, object]) -> str:
+    """The SHA-256 of the arguments as 64 lowercase hex characters, over their canonical JSON:
+    sorted keys, no whitespace, characters as written. Compute it over the value read back from
+    the store (JSONB), so what is bound is what is stored."""
+    canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
 def model_name(server: str, tool_name: str) -> str:

@@ -11,10 +11,13 @@ from app.api.run.controller import (
     fail_lost_runs,
     finish_run,
     start_run,
+    to_wire_run,
 )
 from app.api.run.schema import EventSequence, RunEvent
 from app.config.constants import RATE_LIMITS
-from app.models.run.enums import RunErrorCode, RunEventType, RunStatus
+from app.models.run.enums import RunErrorCode, RunEventType, RunStatus, ToolCallStatus
+from app.models.run.interface import RunRecord
+from app.services.db import execute
 from app.services.utils import clock
 from tests.agent_support import (
     bearer,
@@ -93,6 +96,73 @@ class TestMcpServerUnavailableEvent:
         assert RunEventType("mcp_server_unavailable") is RunEventType.mcp_server_unavailable
 
 
+class TestApprovalEvents:
+    base: ClassVar[dict[str, object]] = {
+        "sequence": 4,
+        "createdAt": "2026-11-01T00:00:00.000Z",
+        "approvalId": "a1",
+        "toolUseId": "toolu_1",
+    }
+
+    def test_approval_requested_carries_the_digest(self) -> None:
+        event = TypeAdapter(RunEvent).validate_python(
+            {**self.base, "type": "approval_requested", "argumentsDigest": "b" * 64}
+        )
+
+        assert event.root.type == "approval_requested"
+        assert event.model_dump(by_alias=True)["argumentsDigest"] == "b" * 64
+
+    def test_approval_requested_requires_the_digest(self) -> None:
+        with pytest.raises(ValidationError):
+            TypeAdapter(RunEvent).validate_python({**self.base, "type": "approval_requested"})
+
+    @pytest.mark.parametrize("decision", ["approved", "rejected"])
+    def test_approval_decided_carries_the_decision(self, decision: str) -> None:
+        event = TypeAdapter(RunEvent).validate_python(
+            {**self.base, "type": "approval_decided", "decision": decision}
+        )
+
+        assert event.root.type == "approval_decided"
+        assert "reason" not in event.model_dump(by_alias=True)
+
+    def test_approval_decided_rejects_a_decision_outside_the_set(self) -> None:
+        with pytest.raises(ValidationError):
+            TypeAdapter(RunEvent).validate_python(
+                {**self.base, "type": "approval_decided", "decision": "maybe"}
+            )
+
+    def test_the_stored_types_exist(self) -> None:
+        assert RunEventType("approval_requested") is RunEventType.approval_requested
+        assert RunEventType("approval_decided") is RunEventType.approval_decided
+
+    def test_the_run_waits_on_the_wire_and_a_tool_call_does_not(self) -> None:
+        assert (
+            to_wire_run(
+                RunRecord(
+                    id="r",
+                    conversation_id="c",
+                    user_id="u",
+                    status=RunStatus.awaiting_approval,
+                    error_code=None,
+                    created_at=clock.now(),
+                    updated_at=clock.now(),
+                )
+            ).status
+            == "awaiting_approval"
+        )
+        with pytest.raises(ValidationError):
+            TypeAdapter(RunEvent).validate_python(
+                {
+                    "type": "tool_call_finished",
+                    "sequence": 5,
+                    "createdAt": "2026-11-01T00:00:00.000Z",
+                    "toolUseId": "t",
+                    "status": ToolCallStatus.awaiting_approval.value,
+                    "output": "",
+                }
+            )
+
+
 class StoreBacked:
     @pytest.fixture(autouse=True)
     async def empty_store(self) -> None:
@@ -108,6 +178,43 @@ async def finished_run(client: httpx.AsyncClient, headers: dict[str, str]) -> st
     await append_run_event(run_id, RunEventType.text_delta, {"text": "lo"})
     assert await finish_run(run_id, RunStatus.completed, None)
     return run_id
+
+
+@store_backed
+class TestStreamAtRest(StoreBacked):
+    """A run at `awaiting_approval` has no more events to give until a person decides, so the
+    stream closes cleanly once it has delivered them, with no `run_finished`."""
+
+    async def test_closes_at_a_pause_after_delivering_every_event(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        headers = bearer()
+        conversation = await start_conversation(client, headers)
+        run_id = await send(client, headers, conversation, "hello")
+        assert await start_run(run_id)
+        await append_run_event(run_id, RunEventType.text_delta, {"text": "Hel"})
+        await execute("update run set status = 'awaiting_approval' where id = %s", (run_id,))
+
+        frames = await asyncio.wait_for(stream(client, headers, run_id), timeout=5)
+
+        assert types_of(frames) == ["run_started", "text_delta"]
+
+    async def test_goes_on_once_the_run_is_running_again(self, client: httpx.AsyncClient) -> None:
+        headers = bearer()
+        conversation = await start_conversation(client, headers)
+        run_id = await send(client, headers, conversation, "hello")
+        assert await start_run(run_id)
+        await execute("update run set status = 'awaiting_approval' where id = %s", (run_id,))
+        paused = await stream(client, headers, run_id)
+        await execute("update run set status = 'running' where id = %s", (run_id,))
+        reading = asyncio.create_task(stream(client, headers, run_id, last_event_id=1))
+        await asyncio.sleep(0.3)
+        assert not reading.done()
+        assert await finish_run(run_id, RunStatus.completed, None)
+        frames = await asyncio.wait_for(reading, timeout=5)
+
+        assert types_of(paused) == ["run_started"]
+        assert types_of(frames) == ["run_finished"]
 
 
 @store_backed

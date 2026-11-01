@@ -84,12 +84,12 @@ class TestRunEventStream:
         assert stream["schema"] == {"$ref": "#/components/schemas/RunEvent"}
         variants = as_object(as_object(as_object(doc["components"])["schemas"])["RunEvent"])
         assert isinstance(variants["oneOf"], list)
-        assert len(variants["oneOf"]) == 6
+        assert len(variants["oneOf"]) == 8
         names = {
             as_object(as_object(as_object(v)["properties"])["type"]).get("const")
             for v in variants["oneOf"]
         }
-        assert "mcp_server_unavailable" in names
+        assert {"mcp_server_unavailable", "approval_requested", "approval_decided"} <= names
 
     def test_documents_the_last_event_id_header_and_the_errors(self) -> None:
         doc = build_openapi_document(app)
@@ -149,6 +149,7 @@ class TestTheDocument:
             "/api/conversation/{id}": {"get"},
             "/api/conversation/{id}/message": {"get", "post"},
             "/api/run/{id}/event": {"get"},
+            "/api/approval/{id}/decision": {"post"},
             "/api/source": {"get", "post"},
             "/api/source/{id}/indexing": {"post"},
             "/api/search": {"get"},
@@ -301,6 +302,8 @@ class TestTheShaping:
                 "EvalRunPage",
                 "EvalScore",
                 "EvalCaseResult",
+                "Approval",
+                "DecideApprovalBody",
             }
         )
 

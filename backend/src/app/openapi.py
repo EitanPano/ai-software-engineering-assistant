@@ -71,6 +71,8 @@ COMPONENTS: Final = frozenset(
         "EvalRunPage",
         "EvalScore",
         "EvalCaseResult",
+        "Approval",
+        "DecideApprovalBody",
     }
 )
 

@@ -8,6 +8,16 @@ import * as z from 'zod'
 export const zAccepted = z.record(z.string(), z.unknown())
 
 /**
+ * Approval
+ */
+export const zApproval = z.object({
+  id: z.string(),
+  toolUseId: z.string(),
+  decision: z.enum(['approved', 'rejected']),
+  decidedAt: z.iso.datetime(),
+})
+
+/**
  * AuthTokens
  */
 export const zAuthTokens = z.object({
@@ -62,6 +72,14 @@ export const zCredentials = z.object({
       /^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/,
     ),
   password: z.string().min(8).max(128),
+})
+
+/**
+ * DecideApprovalBody
+ */
+export const zDecideApprovalBody = z.object({
+  decision: z.enum(['approved', 'rejected']),
+  argumentsDigest: z.string().regex(/^[0-9a-f]{64}$/),
 })
 
 /**
@@ -319,7 +337,7 @@ export const zRefreshBody = z.object({
  */
 export const zRun = z.object({
   id: z.string(),
-  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  status: z.enum(['queued', 'running', 'awaiting_approval', 'completed', 'failed']),
   errorCode: z
     .enum(['refused', 'truncated', 'turn_limit', 'upstream_unavailable', 'interrupted', 'internal'])
     .nullable(),
@@ -373,6 +391,22 @@ export const zRunEvent = z.union([
     sequence: z.int(),
     createdAt: z.iso.datetime(),
     name: z.string(),
+  }),
+  z.object({
+    type: z.literal('approval_requested').optional().default('approval_requested'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+    approvalId: z.string(),
+    toolUseId: z.string(),
+    argumentsDigest: z.string(),
+  }),
+  z.object({
+    type: z.literal('approval_decided').optional().default('approval_decided'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+    approvalId: z.string(),
+    toolUseId: z.string(),
+    decision: z.enum(['approved', 'rejected']),
   }),
   z.object({
     type: z.literal('run_finished').optional().default('run_finished'),
@@ -628,6 +662,17 @@ export const zGetApiRunByIdEventPath = z.object({
  * The run's events as server-sent events; each `id` is the sequence
  */
 export const zGetApiRunByIdEventResponse = zRunEvent
+
+export const zPostApiApprovalByIdDecisionBody = zDecideApprovalBody
+
+export const zPostApiApprovalByIdDecisionPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The recorded decision
+ */
+export const zPostApiApprovalByIdDecisionResponse = zApproval
 
 export const zGetApiSourceQuery = z.object({
   cursor: z.string().optional(),

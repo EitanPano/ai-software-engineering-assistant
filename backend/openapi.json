@@ -1253,6 +1253,97 @@
         }
       }
     },
+    "/api/approval/{id}/decision": {
+      "post": {
+        "tags": [
+          "approval"
+        ],
+        "summary": "Approve or reject a waiting tool call",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideApprovalBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The recorded decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Approval"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/source": {
       "post": {
         "tags": [
@@ -1850,6 +1941,37 @@
         "type": "object",
         "title": "Accepted"
       },
+      "Approval": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "toolUseId": {
+            "type": "string",
+            "title": "Tooluseid"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "toolUseId",
+          "decision",
+          "decidedAt"
+        ],
+        "title": "Approval"
+      },
       "AuthSession": {
         "properties": {
           "user": {
@@ -2042,6 +2164,27 @@
           "password"
         ],
         "title": "Credentials"
+      },
+      "DecideApprovalBody": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "argumentsDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "argumentsDigest"
+        ],
+        "title": "DecideApprovalBody"
       },
       "ErrorBody": {
         "properties": {
@@ -3003,6 +3146,7 @@
             "enum": [
               "queued",
               "running",
+              "awaiting_approval",
               "completed",
               "failed"
             ]
@@ -3205,6 +3349,88 @@
               "name"
             ],
             "title": "McpServerUnavailableEvent"
+          },
+          {
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "approval_requested",
+                "title": "Type",
+                "default": "approval_requested"
+              },
+              "sequence": {
+                "type": "integer",
+                "title": "Sequence"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "approvalId": {
+                "type": "string",
+                "title": "Approvalid"
+              },
+              "toolUseId": {
+                "type": "string",
+                "title": "Tooluseid"
+              },
+              "argumentsDigest": {
+                "type": "string",
+                "title": "Argumentsdigest"
+              }
+            },
+            "type": "object",
+            "required": [
+              "sequence",
+              "createdAt",
+              "approvalId",
+              "toolUseId",
+              "argumentsDigest"
+            ],
+            "title": "ApprovalRequestedEvent"
+          },
+          {
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "approval_decided",
+                "title": "Type",
+                "default": "approval_decided"
+              },
+              "sequence": {
+                "type": "integer",
+                "title": "Sequence"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "approvalId": {
+                "type": "string",
+                "title": "Approvalid"
+              },
+              "toolUseId": {
+                "type": "string",
+                "title": "Tooluseid"
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "approved",
+                  "rejected"
+                ],
+                "title": "Decision"
+              }
+            },
+            "type": "object",
+            "required": [
+              "sequence",
+              "createdAt",
+              "approvalId",
+              "toolUseId",
+              "decision"
+            ],
+            "title": "ApprovalDecidedEvent"
           },
           {
             "properties": {

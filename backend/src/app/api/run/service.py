@@ -10,8 +10,10 @@ from datetime import UTC, datetime
 
 from psycopg.types.json import Jsonb
 
-from app.models.run.enums import RunErrorCode, RunEventType, RunStatus
-from app.models.run.interface import RunEventRecord, RunRecord, ToolCallRecord
+from app.models.approval.enums import ApprovalDecision
+from app.models.approval.interface import ApprovalCall, ApprovalRecord
+from app.models.run.enums import RunErrorCode, RunEventType, RunStatus, ToolCallStatus
+from app.models.run.interface import PendingTurn, RunEventRecord, RunRecord, ToolCallRecord
 from app.services.db import Executor, execute, fetch_all, fetch_one, get_db
 
 
@@ -43,6 +45,56 @@ class _Flag:
 @dataclass(frozen=True)
 class _Total:
     total: int
+
+
+@dataclass(frozen=True)
+class _StatusRow:
+    status: str
+
+
+@dataclass(frozen=True)
+class _PendingRow:
+    pending_turn: dict[str, object] | None
+
+
+@dataclass(frozen=True)
+class _ArgumentsRow:
+    arguments: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _ApprovalCallRow:
+    id: str
+    run_id: str
+    tool_call_id: str
+    user_id: str
+    arguments_digest: str
+    decision: str | None
+    created_at: datetime
+    decided_at: datetime | None
+    tool_use_id: str
+    mcp_server_id: str | None
+    tool_name: str
+    arguments: dict[str, object]
+
+
+def _to_approval_call(row: _ApprovalCallRow) -> ApprovalCall:
+    return ApprovalCall(
+        approval=ApprovalRecord(
+            id=row.id,
+            run_id=row.run_id,
+            tool_call_id=row.tool_call_id,
+            user_id=row.user_id,
+            arguments_digest=row.arguments_digest,
+            decision=None if row.decision is None else ApprovalDecision(row.decision),
+            created_at=row.created_at.astimezone(UTC),
+            decided_at=None if row.decided_at is None else row.decided_at.astimezone(UTC),
+        ),
+        tool_use_id=row.tool_use_id,
+        mcp_server_id=row.mcp_server_id,
+        tool_name=row.tool_name,
+        arguments=row.arguments,
+    )
 
 
 def _to_run(row: _RunRow) -> RunRecord:
@@ -254,11 +306,198 @@ async def list_events_after(
     return [_to_event(row) for row in rows]
 
 
-async def is_finished(run_id: str, *, db: Executor | None = None) -> bool:
+async def is_at_rest(run_id: str, *, db: Executor | None = None) -> bool:
+    """Whether the run will write no event until something outside it acts: it ended, or it waits
+    for a person's decision. A stream that has delivered its events then closes."""
     row = await fetch_one(
         _Flag,
-        "select true as found from run where id = %s and status in ('completed', 'failed')",
+        "select true as found from run where id = %s "
+        "and status in ('completed', 'failed', 'awaiting_approval')",
         (run_id,),
         db=db,
     )
     return row is not None
+
+
+async def lock_run_status(run_id: str, *, db: Executor) -> RunStatus | None:
+    """The run's status, holding its row until the transaction ends: concurrent last decisions
+    take turns, so exactly one sees nothing left undecided."""
+    row = await fetch_one(
+        _StatusRow, "select status from run where id = %s for update", (run_id,), db=db
+    )
+    return None if row is None else RunStatus(row.status)
+
+
+async def mark_awaiting_approval(
+    run_id: str, pending: PendingTurn, now: datetime, *, db: Executor
+) -> bool:
+    """Running to `awaiting_approval`, keeping the turn the resume appends."""
+    row = await fetch_one(
+        _Flag,
+        "update run set status = 'awaiting_approval', pending_turn = %s, updated_at = %s "
+        "where id = %s and status = 'running' returning true as found",
+        (Jsonb({"content": pending.content, "results": pending.results}), now, run_id),
+        db=db,
+    )
+    return row is not None
+
+
+async def mark_running_again(run_id: str, now: datetime, *, db: Executor) -> bool:
+    """The last decision: `awaiting_approval` to running. False when the run is not waiting."""
+    row = await fetch_one(
+        _Flag,
+        "update run set status = 'running', updated_at = %s "
+        "where id = %s and status = 'awaiting_approval' returning true as found",
+        (now, run_id),
+        db=db,
+    )
+    return row is not None
+
+
+async def claim_pending_turn(run_id: str, *, db: Executor | None = None) -> PendingTurn | None:
+    """Takes the turn a paused run kept, in one statement: only a running run that still holds one
+    returns it, and it holds none afterwards, so a second delivery of the same flip, or a run a
+    sweep ended, claims nothing."""
+    row = await fetch_one(
+        _PendingRow,
+        # `returning` shows the row after the update, so the turn is read through a locking
+        # subquery: a second claim waits for the first, then finds the column null.
+        "with old as (select id, pending_turn from run where id = %s and status = 'running' "
+        "and pending_turn is not null for update) "
+        "update run set pending_turn = null from old where run.id = old.id "
+        "returning old.pending_turn as pending_turn",
+        (run_id,),
+        db=db,
+    )
+    if row is None or row.pending_turn is None:
+        return None
+    content = row.pending_turn.get("content")
+    results = row.pending_turn.get("results")
+    if not isinstance(content, list) or not isinstance(results, list):
+        # Claimed and unreadable: an empty turn, which the resume fails as `internal`, so the run
+        # ends and is not left running with nothing to do.
+        return PendingTurn(content=[], results=[])
+    return PendingTurn(
+        content=[block for block in content if isinstance(block, dict)],
+        results=[block for block in results if isinstance(block, dict)],
+    )
+
+
+async def insert_waiting_call(record: ToolCallRecord, *, db: Executor) -> dict[str, object]:
+    """A call that waits for a person; the arguments as the store reads them back, which is what
+    the approval's digest is computed over."""
+    row = await fetch_one(
+        _ArgumentsRow,
+        """
+        insert into tool_call
+          (id, run_id, tool_use_id, mcp_server_id, tool_name, arguments, result, status, created_at)
+        values (%s, %s, %s, %s, %s, %s, '', 'awaiting_approval', %s)
+        returning arguments""",
+        (
+            record.id,
+            record.run_id,
+            record.tool_use_id,
+            record.mcp_server_id,
+            record.tool_name,
+            Jsonb(record.arguments),
+            record.created_at,
+        ),
+        db=db,
+    )
+    if row is None:
+        raise RuntimeError("tool_call insert returned no row")
+    return row.arguments
+
+
+async def finish_tool_call(
+    run_id: str,
+    tool_use_id: str,
+    status: ToolCallStatus,
+    result: str,
+    *,
+    db: Executor | None = None,
+) -> bool:
+    """Ends a waiting call: only a row still at `awaiting_approval` changes, so a call ends once.
+    (`insert_tool_call` does nothing on a conflict, which would leave the row waiting.)"""
+    row = await fetch_one(
+        _Flag,
+        "update tool_call set status = %s, result = %s "
+        "where run_id = %s and tool_use_id = %s and status = 'awaiting_approval' "
+        "returning true as found",
+        (status, result, run_id, tool_use_id),
+        db=db,
+    )
+    return row is not None
+
+
+async def insert_approval(record: ApprovalRecord, *, db: Executor) -> None:
+    await execute(
+        "insert into approval (id, run_id, tool_call_id, user_id, arguments_digest, decision, "
+        "created_at, decided_at) values (%s, %s, %s, %s, %s, null, %s, null)",
+        (
+            record.id,
+            record.run_id,
+            record.tool_call_id,
+            record.user_id,
+            record.arguments_digest,
+            record.created_at,
+        ),
+        db=db,
+    )
+
+
+async def find_approval_call(
+    approval_id: str, *, db: Executor | None = None
+) -> ApprovalCall | None:
+    row = await fetch_one(
+        _ApprovalCallRow,
+        """
+        select a.id, a.run_id, a.tool_call_id, a.user_id, a.arguments_digest, a.decision,
+               a.created_at, a.decided_at, c.tool_use_id, c.mcp_server_id, c.tool_name, c.arguments
+        from approval a join tool_call c on c.id = a.tool_call_id where a.id = %s""",
+        (approval_id,),
+        db=db,
+    )
+    return None if row is None else _to_approval_call(row)
+
+
+async def list_approval_calls(run_id: str, *, db: Executor | None = None) -> list[ApprovalCall]:
+    rows = await fetch_all(
+        _ApprovalCallRow,
+        """
+        select a.id, a.run_id, a.tool_call_id, a.user_id, a.arguments_digest, a.decision,
+               a.created_at, a.decided_at, c.tool_use_id, c.mcp_server_id, c.tool_name, c.arguments
+        from approval a join tool_call c on c.id = a.tool_call_id where c.run_id = %s
+        order by a.created_at, a.id""",
+        (run_id,),
+        db=db,
+    )
+    return [_to_approval_call(row) for row in rows]
+
+
+async def decide_approval(
+    approval_id: str,
+    decision: ApprovalDecision,
+    now: datetime,
+    *,
+    db: Executor,
+) -> bool:
+    """Records the decision of an approval still undecided; false when it was already decided."""
+    row = await fetch_one(
+        _Flag,
+        "update approval set decision = %s, decided_at = %s "
+        "where id = %s and decision is null returning true as found",
+        (decision, now, approval_id),
+        db=db,
+    )
+    return row is not None
+
+
+async def count_undecided(run_id: str, *, db: Executor) -> int:
+    row = await fetch_one(
+        _Total,
+        "select count(*) as total from approval where run_id = %s and decision is null",
+        (run_id,),
+        db=db,
+    )
+    return 0 if row is None else row.total

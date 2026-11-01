@@ -87,9 +87,12 @@ export default defineConfig({
           // A fresh API every run (never a leftover one with someone's data), with its limits
           // scaled so the suite does not trip them. Playwright starts web servers before its
           // global setup, so the browser-test database is prepared in the same command, before
-          // the API connects to it.
+          // the API connects to it. The seed comes after `e2e-db`, whose restore deletes the last
+          // run's `fixture` MCP server row: it registers the `fixture` server (served by the
+          // Anthropic fake's process) with its `note` tool at `ask`, for the approval journeys.
           name: 'api',
-          command: 'uv run poe e2e-db && uv run python -m app.main',
+          command:
+            'uv run poe e2e-db && uv run python -m tests.seed_ask_tool && uv run python -m app.main',
           cwd: '../backend',
           url: 'http://127.0.0.1:8000/api/health',
           reuseExistingServer: false,

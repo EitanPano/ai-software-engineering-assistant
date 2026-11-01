@@ -15,10 +15,12 @@ from app.infra.pubsub import SubscriberEntry, Unsubscribe, pubsub
 __all__ = [
     "EVAL_RUN_QUEUED",
     "RUN_CREATED",
+    "RUN_RESUMED",
     "SOURCE_QUEUED",
     "USER_REGISTERED",
     "EvalRunQueued",
     "RunCreated",
+    "RunResumed",
     "SourceQueued",
     "Topic",
     "Unsubscribe",
@@ -52,6 +54,15 @@ class RunCreated(TypedDict):
 
 # Published by the conversation controller after a send; the agent executes the run.
 RUN_CREATED: Final = Topic[RunCreated]("run.created")
+
+
+class RunResumed(TypedDict):
+    run_id: str
+
+
+# Published by the approval controller after the last pending decision of a run; the agent resumes
+# the run.
+RUN_RESUMED: Final = Topic[RunResumed]("run.resumed")
 
 
 class SourceQueued(TypedDict):

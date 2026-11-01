@@ -21,6 +21,9 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | tool call | One request by the agent to execute a tool, with its arguments and result | table `tool_call` |
 | tool definition | What a tool offers the model: its `<server>__<tool>` name, description and input schema | `mcp_server.tool_definition`, `conversation.tool_definition` |
 | approval | A human's decision on a tool call | table `approval`, route `/api/approval`, module `approval` |
+| awaiting approval | The status of a run, and of a tool call, that waits for a person's decision | `run.status`, `tool_call.status` value `awaiting_approval` |
+| pending turn | The assistant turn a paused run keeps whole, with the results already known, stored as two turns when the run resumes | `run.pending_turn`, model `PendingTurn` |
+| arguments digest | SHA-256 of a held call's canonical stored arguments, echoed by the decision so it binds to what the person was shown | `approval.arguments_digest`, field `argumentsDigest` |
 | tool policy | The rule that allows, asks about or denies a tool | table `tool_policy`, route `/api/tool-policy`, module `tool_policy` |
 | MCP server | A Model Context Protocol server the agent's tools come from | table `mcp_server`, route `/api/mcp-server`, module `mcp_server` |
 | knowledge base | Every chunk of every `ready` source, searched by a signed-in person and by the agent | route `/api/search`, MCP server `knowledge` |

@@ -1,7 +1,9 @@
 import { getApiRunByIdEvent } from '@/shared/api/generated'
 import type { RunEvent } from '@/shared/api'
 
-export type StreamOutcome = 'finished' | 'lost' | 'aborted'
+// `paused`: the server closed the stream cleanly while an approval is undecided. The run waits for
+// a person, so nothing is reopened until `streamRun` is called again (after a decision).
+export type StreamOutcome = 'finished' | 'lost' | 'aborted' | 'paused'
 
 export type StreamOptions = {
   signal: AbortSignal
@@ -30,6 +32,8 @@ export async function streamRun(
 ): Promise<StreamOutcome> {
   let lastSequence = -1
   let failures = 0
+  // Approvals asked and not yet decided, across connections.
+  const undecided = new Set<string>()
   // A function, so the checks below are not narrowed by the loop condition.
   const aborted = () => signal.aborted
 
@@ -55,6 +59,8 @@ export async function streamRun(
         if (event.sequence <= lastSequence) continue
         lastSequence = event.sequence
         progressed = true
+        if (event.type === 'approval_requested') undecided.add(event.approvalId)
+        if (event.type === 'approval_decided') undecided.delete(event.approvalId)
         onEvent(event)
         if (event.type === 'run_finished') return 'finished'
       }
@@ -64,6 +70,9 @@ export async function streamRun(
     }
 
     if (aborted()) break
+    // A clean close with a question open is the server's pause, not its stream lifetime: reopening
+    // at the delay below would spend the per-user stream limit in seconds for nothing.
+    if (!errored && undecided.size > 0) return 'paused'
     // Progress or a clean close shows the server is answering: the count restarts. Only a
     // connection that errored and brought nothing is a failure, so a stuck run still ends (its
     // reopens meet the stream's rate limit).

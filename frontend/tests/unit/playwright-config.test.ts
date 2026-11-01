@@ -85,6 +85,20 @@ describe('playwright.config.ts', () => {
     expect(api).not.toHaveProperty('stdout')
   })
 
+  it('seeds the ask tool after the e2e database is prepared and before the API starts', async () => {
+    const config = await load({ E2E_BASE_URL: '', E2E_DATABASE_URL: 'postgres://u:p@h/app_e2e' })
+    const servers = [config.webServer ?? []].flat()
+    const api = servers.find((server) => server.command.includes('app.main'))
+    const command = api?.command ?? ''
+
+    // e2e-db's restore_seed deletes the last run's fixture row, so the seed comes after it.
+    expect(command).toContain('tests.seed_ask_tool')
+    expect(command.indexOf('e2e-db')).toBeLessThan(command.indexOf('tests.seed_ask_tool'))
+    expect(command.indexOf('tests.seed_ask_tool')).toBeLessThan(command.indexOf('app.main'))
+    // Six web servers stay: the tail reporter's line budget depends on the count.
+    expect(servers).toHaveLength(6)
+  })
+
   it('keeps an explicit E2E_BASE_URL and starts nothing', async () => {
     const config = await load({ E2E_BASE_URL: 'http://127.0.0.1:3000' })
 

@@ -29,7 +29,7 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 - Hybrid RAG: semantic and keyword search over connected GitHub repositories
 - Agentic RAG: the agent decides when to search, searches again when a result does not answer, and cites file and line
 - Persistent agent memory: conversation history distinct from long-term knowledge (planned)
-- Tool execution permissions: human approval for sensitive actions (planned)
+- Tool execution permissions: a tool set to `ask` waits for a person to approve its exact arguments, across a restart; the first such tool comes with GitHub (planned)
 - Streaming responses: intermediate tool activity shown as it happens
 - Evaluation pipelines: an admin measures retrieval quality with an eval run; answer correctness (planned)
 - Structured outputs: results validated against schemas (planned)
