@@ -15,6 +15,7 @@ is byte-stable and the cache does not miss silently. A tool is offered as `<serv
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from typing import Final, Literal
 
@@ -23,9 +24,11 @@ from jsonschema.validators import validator_for
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
-from app.models.mcp_server.constants import KNOWLEDGE_SERVER
+from app.models.mcp_server.constants import GITHUB_SERVER, KNOWLEDGE_SERVER
+from app.models.mcp_server.enums import PinStatus, ToolChange
 from app.models.mcp_server.interface import McpServerRecord
 from app.models.mcp_server.type import ListedTool, canonical, same_definition
+from app.models.tool_policy.constants import GITHUB_ALLOWABLE_TOOLS
 from app.models.tool_policy.enums import PolicyEffect
 
 type Decision = Literal["allow", "ask", "deny"]
@@ -138,25 +141,94 @@ def _shown(name: str) -> str:
     return json.dumps(name)[1:-1]
 
 
+def _forms(tools: Sequence[ListedTool] | None) -> dict[str, set[str]]:
+    """Each name's definitions as canonical JSON: a name listed twice holds two."""
+    forms: dict[str, set[str]] = {}
+    for t in tools or []:
+        forms.setdefault(t.name, set()).add(canonical(t.name, t.description, t.input_schema))
+    return forms
+
+
+def tool_changes(
+    pinned: Sequence[ListedTool] | None, live: Sequence[ListedTool]
+) -> dict[str, ToolChange]:
+    """What the live listing did to each tool, by name: every name of either side. A name listed
+    twice is `changed` unless every copy matches the pin. The one comparison under both
+    `listing_changes` (the command) and the review screen."""
+    before, after = _forms(pinned), _forms(live)
+    changes: dict[str, ToolChange] = {}
+    for name in sorted(before.keys() | after.keys()):
+        if name not in before:
+            changes[name] = ToolChange.added
+        elif name not in after:
+            changes[name] = ToolChange.removed
+        elif before[name] != after[name]:
+            changes[name] = ToolChange.changed
+        else:
+            changes[name] = ToolChange.unchanged
+    return changes
+
+
 def listing_changes(pinned: Sequence[ListedTool] | None, live: Sequence[ListedTool]) -> list[str]:
     """What differs between the pin and the live listing, one line each: `added: x`, `removed: x`,
     `changed: x`, by tool name, in name order. Empty when they are equal."""
-    before: dict[str, set[str]] = {}
-    for t in pinned or []:
-        before.setdefault(t.name, set()).add(canonical(t.name, t.description, t.input_schema))
-    after: dict[str, set[str]] = {}
-    for t in live:
-        after.setdefault(t.name, set()).add(canonical(t.name, t.description, t.input_schema))
+    changes = tool_changes(pinned, live)
     # A name is rendered as JSON: a server chooses it, and a control character in it must not reach
-    # an admin's terminal. A name listed twice differs from the pin unless every copy matches.
-    lines = [f"added: {_shown(name)}" for name in sorted(after.keys() - before.keys())]
-    lines += [f"removed: {_shown(name)}" for name in sorted(before.keys() - after.keys())]
-    lines += [
-        f"changed: {_shown(name)}"
-        for name in sorted(before.keys() & after.keys())
-        if before[name] != after[name]
+    # an admin's terminal.
+    return [
+        f"{kind}: {_shown(name)}"
+        for kind in (ToolChange.added, ToolChange.removed, ToolChange.changed)
+        for name, change in changes.items()
+        if change is kind
     ]
-    return lines
+
+
+def pin_status(server: McpServerRecord) -> PinStatus:
+    """Where the server's pin stands, from stored rows alone (no call to any server): `knowledge`
+    is ours and needs none; a third party with no pin is `unpinned`; otherwise `changed` when the
+    last listing differs from the pin (by `canonical`, so `0` and `false` differ) and `current`
+    when it does not, or when there is no last listing yet."""
+    if server.name == KNOWLEDGE_SERVER:
+        return PinStatus.not_required
+    if server.pinned_tool_definition is None:
+        return PinStatus.unpinned
+    if server.tool_definition is None:
+        return PinStatus.current
+    if listing_changes(server.pinned_tool_definition, server.tool_definition):
+        return PinStatus.changed
+    return PinStatus.current
+
+
+def printed_schema(schema: object) -> str:
+    """A definition's schema as the review screen shows it: `sort_keys`, two-space indent, the
+    characters as written. Printed here and sent as a string: `canonical` calls `1` and `1.0`
+    different and a browser's `JSON.parse` would print them alike and round past 2^53."""
+    return json.dumps(schema, sort_keys=True, indent=2, ensure_ascii=False)
+
+
+TOOL_NAME: Final = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def listing_problem(tools: Sequence[ListedTool]) -> str | None:
+    """Why a listing cannot be accepted, or `None`: no tool, a name listed twice, or a name outside
+    `[A-Za-z0-9_-]+` (the API refuses such a name, which would fail every new conversation, and a
+    name could carry terminal escapes). The text names no tool: it is the server's. One rule for
+    the review, the accept and the command."""
+    names = [t.name for t in tools]
+    if not names:
+        return "the server lists no tool"
+    if len(set(names)) != len(names) or not all(TOOL_NAME.fullmatch(n) for n in names):
+        return "the listing has a tool name that is repeated or not [A-Za-z0-9_-]+"
+    return None
+
+
+def effects_for(server_name: str, tool_name: str) -> list[PolicyEffect]:
+    """The effects an admin may set for a tool. On `github` only the five reads may be `allow`
+    (`GITHUB_ALLOWABLE_TOOLS`): anything the agent changes there needs an approval, a tool it has
+    never seen included. Another server has no cap."""
+    if server_name == GITHUB_SERVER and tool_name not in GITHUB_ALLOWABLE_TOOLS:
+        return [PolicyEffect.ask, PolicyEffect.deny]
+    return [PolicyEffect.allow, PolicyEffect.ask, PolicyEffect.deny]
 
 
 def _field(error: ValidationError, schema_keys: set[str], given: set[str]) -> list[str]:

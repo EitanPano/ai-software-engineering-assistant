@@ -1,14 +1,20 @@
 import json
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
+from app.models.mcp_server.enums import PinStatus, ToolChange
 from app.models.mcp_server.interface import McpServerRecord
 from app.models.mcp_server.type import ListedTool, canonical
+from app.models.tool_policy.constants import GITHUB_ALLOWABLE_TOOLS
 from app.models.tool_policy.enums import PolicyEffect
 from app.services import tool
 from app.services.tool import InvalidToolInput
+
+MIGRATIONS = Path(__file__).resolve().parents[2] / "src" / "app" / "infra" / "migrations"
 
 ECHO_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -184,6 +190,140 @@ class TestListingChanges:
 
         assert tool.listing_changes([pin], [other, pin]) == ["changed: a"]
         assert tool.listing_changes([pin], [pin, pin]) == []
+
+
+def with_default(name: str, default: object) -> ListedTool:
+    return listed(name, {"type": "object", "properties": {"n": {"default": default}}})
+
+
+class TestPinStatus:
+    """V01: the status is read from stored rows, with no call to any server."""
+
+    def test_knowledge_needs_no_pin(self) -> None:
+        assert tool.pin_status(server("knowledge", pinned=None)) is PinStatus.not_required
+
+    def test_a_third_party_with_no_pin_is_unpinned(self) -> None:
+        assert tool.pin_status(server(pinned=None, listing=[listed("a")])) is PinStatus.unpinned
+
+    def test_a_last_listing_equal_to_the_pin_is_current(self) -> None:
+        assert (
+            tool.pin_status(server(pinned=[listed("a")], listing=[listed("a")]))
+            is PinStatus.current
+        )
+
+    def test_a_pin_with_no_last_listing_is_current(self) -> None:
+        assert tool.pin_status(server(pinned=[listed("a")])) is PinStatus.current
+
+    def test_a_different_last_listing_is_changed(self) -> None:
+        live = [replace(listed("a"), description="other")]
+
+        assert tool.pin_status(server(pinned=[listed("a")], listing=live)) is PinStatus.changed
+
+    def test_an_added_or_removed_tool_is_changed(self) -> None:
+        pin = [listed("a")]
+
+        assert tool.pin_status(server(pinned=pin, listing=[*pin, listed("b")])) is PinStatus.changed
+        assert tool.pin_status(server(pinned=pin, listing=[])) is PinStatus.changed
+
+    def test_zero_against_false_is_changed_where_python_calls_them_equal(self) -> None:
+        status = tool.pin_status(
+            server(pinned=[with_default("a", 0)], listing=[with_default("a", False)])
+        )
+
+        assert status is PinStatus.changed
+
+
+class TestToolChanges:
+    def test_names_each_tool_as_added_removed_changed_or_unchanged(self) -> None:
+        pinned = [listed("kept"), listed("gone"), listed("edited")]
+        live = [listed("kept"), listed("new"), replace(listed("edited"), description="x")]
+
+        assert tool.tool_changes(pinned, live) == {
+            "kept": ToolChange.unchanged,
+            "gone": ToolChange.removed,
+            "new": ToolChange.added,
+            "edited": ToolChange.changed,
+        }
+
+    def test_everything_is_added_without_a_pin(self) -> None:
+        assert tool.tool_changes(None, [listed("a")]) == {"a": ToolChange.added}
+
+    def test_one_in_one_out_agrees_with_listing_changes(self) -> None:
+        pinned = [listed("kept"), listed("gone")]
+        live = [listed("kept"), listed("new")]
+
+        kinds = tool.tool_changes(pinned, live)
+
+        lines = tool.listing_changes(pinned, live)
+        assert lines == ["added: new", "removed: gone"]
+        assert {n for n, k in kinds.items() if k is not ToolChange.unchanged} == {"new", "gone"}
+
+
+class TestPrintedSchema:
+    def test_one_and_one_point_zero_print_differently(self) -> None:
+        one = tool.printed_schema({"default": 1})
+        one_float = tool.printed_schema({"default": 1.0})
+
+        assert one != one_float
+        assert '"default": 1\n' in one
+        assert '"default": 1.0\n' in one_float
+
+    def test_prints_sorted_indented_and_unescaped(self) -> None:
+        assert tool.printed_schema({"b": "é", "a": 1}) == '{\n  "a": 1,\n  "b": "é"\n}'
+
+    def test_a_number_past_two_to_the_fifty_third_keeps_every_digit(self) -> None:
+        assert "9007199254740993" in tool.printed_schema({"n": 9007199254740993})
+
+
+class TestEffectsFor:
+    """V06: only the five `github` reads may be `allow`."""
+
+    def test_the_five_reads_offer_all_three(self) -> None:
+        for name in GITHUB_ALLOWABLE_TOOLS:
+            assert tool.effects_for("github", name) == [
+                PolicyEffect.allow,
+                PolicyEffect.ask,
+                PolicyEffect.deny,
+            ]
+
+    @pytest.mark.parametrize("name", ["issue_write", "add_issue_comment", "a_future_tool"])
+    def test_every_other_github_name_offers_ask_and_deny(self, name: str) -> None:
+        assert tool.effects_for("github", name) == [PolicyEffect.ask, PolicyEffect.deny]
+
+    def test_another_server_has_no_cap(self) -> None:
+        assert PolicyEffect.allow in tool.effects_for("lab", "anything")
+        assert PolicyEffect.allow in tool.effects_for("knowledge", "search")
+
+    def test_the_constant_equals_the_allow_rows_of_migration_0011(self) -> None:
+        sql = (MIGRATIONS / "0011-github-mcp-server.sql").read_text(encoding="utf-8")
+
+        seeded = set(re.findall(r"'github', '([a-z_]+)', 'allow'", sql))
+
+        assert seeded == set(GITHUB_ALLOWABLE_TOOLS)
+        assert len(seeded) == 5
+
+
+class TestListingProblem:
+    """V04: one rule for the review, the accept and the command."""
+
+    def test_a_good_listing_has_none(self) -> None:
+        assert tool.listing_problem([listed("a"), listed("B-2_c")]) is None
+
+    def test_no_tool_is_refused(self) -> None:
+        assert tool.listing_problem([]) is not None
+
+    def test_a_repeated_name_is_refused(self) -> None:
+        assert tool.listing_problem([listed("a"), listed("a")]) is not None
+
+    @pytest.mark.parametrize("name", ["", "a b", "a.b", "a__b\n", "x\x1b[2J", "é", "a/b"])
+    def test_a_name_outside_the_set_is_refused(self, name: str) -> None:
+        assert tool.listing_problem([listed(name)]) is not None
+
+    def test_the_reason_never_holds_a_name(self) -> None:
+        problem = tool.listing_problem([listed("x\x1b[2J")])
+
+        assert problem is not None
+        assert "\x1b" not in problem
 
 
 class TestPinHolds:

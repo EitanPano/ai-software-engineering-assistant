@@ -207,8 +207,9 @@ returnTo?)` throws a redirect to `/sign-in?next=…`; `requireRole(queryClient, 
   in in the query cache and the hint; the form navigates to a safe `next` path (`safeNextPath`
   accepts only a path on this site). Sign-out clears the cache and the hint whatever the API said.
 - **Staff pages.** Put them under a pathless route whose loader calls `requireRole(queryClient,
-'admin')`, and give every staff loader the same call. `/source`, `/source/connect`, `/eval-run`
-  and `/eval-run/:id` are the staff pages; the first admin is made with the server's `grant_admin` script.
+'admin')`, and give every staff loader the same call. `/source`, `/source/connect`, `/eval-run`,
+  `/eval-run/:id`, `/mcp-server`, `/mcp-server/:id` and `/mcp-server/:id/listing` are the staff pages; the
+  first admin is made with the server's `grant_admin` script.
 - **Renaming the roles.** The template's roles are `user` and `admin`. A product that renames them
   changes the role type guard in `shared/auth/session.ts` (it accepts only those two values, so
   an account with another role reads as signed out), every `requireRole(...)` call, the role-gated layout
@@ -393,6 +394,24 @@ tests.seed_ask_tool`, then `app.main`: `e2e-db`'s restore deletes the last run's
   `account.databaseUrl` only. The one active run is global and journeys run in parallel, so
   `startRun` accepts a 409 and the journey waits for any completed row. `/eval-run` and
   `/eval-run-detail` are in `SIGNED_IN_ROUTES` (the latter with `grantAdminWithCases`).
+- **MCP servers.** `/mcp-server/:id/listing` is the one page that calls a live server: its loader
+  prefetches nothing (`requireRole` only), `listingQuery` is read once per visit
+  (`refetchOnMount`, `refetchOnWindowFocus` and `refetchOnReconnect` all `false`, with
+  `staleTime: Infinity`, stop every automatic read, even after a failed read, which marks the
+  query invalidated; only the 409's invalidate reloads a page already open; never
+  `staleTime: 'static'`, it stops that reload; `gcTime: 0`, so a reopened page reads again; another
+  failure keeps what was read), and its segment boundary (`listing/error.tsx`) words a server that did not
+  answer (503) and a listing the rules refuse (409). `ListingTool` shows every third-party string through
+  `visibleText` as plain text that wraps (no inner scroll, no height cap), and the two input
+  schemas as the printed strings the server sent, never parsed or reformatted, so the accept comes
+  after all of it. `feature/accept` is a paid-start mutation like `feature/approve` (`retry: false`,
+  `networkMode: 'always'`) whose body is the shown `listingDigest` only; a stale accept (409) is a
+  toast and the listing reloads. A policy select's options come from the API's `effects`, and a
+  tool with no row (`effect: null`) reads `Denied (no rule)`. `mcp-server.spec.ts` seeds its own
+  server with the backend's `tests.seed_changed_server <name>` on `account.databaseUrl` only
+  (`mcp-server-support.ts`), disables it again at its end, and registers nothing under
+  `E2E_BASE_URL`; `/mcp-server`, `/mcp-server-detail` and `/mcp-server-listing` are in
+  `SIGNED_IN_ROUTES` over the shared `github` server, read only.
 - **A role on a nav entry.** `NavEntry.role` (optional) limits an entry in `app/nav.ts` to accounts
   with that role; `(site)/layout.tsx` filters the table through `useCurrentUser`. It is cosmetic:
   the route's loader and the API enforce the role.

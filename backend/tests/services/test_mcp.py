@@ -29,6 +29,7 @@ from tests.fake_github_mcp import (
     create_github_app,
     recorded_tools,
 )
+from tests.rewrite_app import Rewrite
 
 TOKEN = "a-test-token-of-at-least-32-characters-long"
 URL = "http://lab:8001/mcp"
@@ -601,3 +602,50 @@ class TestPinnedCall:
                 token="x" * 40,
                 pinned=recorded("list_issues"),
             )
+
+
+def _hostile(schema: dict[str, object]) -> ListedTool:
+    return ListedTool(name="odd", description="d", input_schema=schema)
+
+
+class TestUnstorableListing:
+    """V04: JSONB refuses these, so `list_tools` reports the server as unreachable with its own
+    reason, after the session has returned (inside it `_session` would rewrite the reason)."""
+
+    @pytest.mark.parametrize(
+        ("schema", "swaps"),
+        [
+            ({"type": "object", "title": "a\x00b"}, {}),
+            ({"type": "object", "default": "@@"}, {b'"@@"': b"NaN"}),
+            ({"type": "object", "default": "@@"}, {b'"@@"': b"Infinity"}),
+            ({"type": "object", "default": "@@"}, {b'"@@"': b"-Infinity"}),
+            ({"type": "object", "default": "@@"}, {b'"@@"': b"1e400"}),
+        ],
+        ids=["nul", "nan", "infinity", "minus-infinity", "overflow"],
+    )
+    async def test_is_unavailable_with_its_own_reason(
+        self, schema: dict[str, object], swaps: dict[bytes, bytes]
+    ) -> None:
+        app = build_app([_hostile(schema)], handler, token=TOKEN, allowed_hosts=["lab:*"])
+        async with app.lifespan():
+            mcp.use_transport(httpx2.ASGITransport(app=Rewrite(app, swaps)))
+            try:
+                with pytest.raises(McpUnavailable) as raised:
+                    await list_tools(URL, token=TOKEN)
+            finally:
+                mcp.use_transport(None)
+
+        assert raised.value.reason == "unstorable_listing"
+
+    async def test_a_clean_listing_still_passes(self) -> None:
+        app = build_app(
+            [_hostile({"type": "object"})], handler, token=TOKEN, allowed_hosts=["lab:*"]
+        )
+        async with app.lifespan():
+            mcp.use_transport(httpx2.ASGITransport(app=Rewrite(app, {})))
+            try:
+                tools = await list_tools(URL, token=TOKEN)
+            finally:
+                mcp.use_transport(None)
+
+        assert [t.name for t in tools] == ["odd"]

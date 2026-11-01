@@ -53,6 +53,7 @@ from app.services import tool
 from app.services.anthropic import Block, ModelUnavailable, TurnResult, served_blocks, stream_turn
 from app.services.logger import log
 from app.services.security.crypto import constant_time_equals
+from app.services.utils.jsonb import jsonb_safe
 
 _DENIED_OUTPUT: Final = "this tool is not permitted"
 # Its own text, distinct from the policy's: the model can tell a person said no from a rule. It
@@ -346,17 +347,6 @@ def _assistant(content: list[Block]) -> NewTurn:
     )
 
 
-def _holds_nul(value: object) -> bool:
-    """Whether an input has a NUL anywhere, in a key or a value: a JSONB column cannot store it."""
-    if isinstance(value, str):
-        return "\x00" in value
-    if isinstance(value, dict):
-        return any(_holds_nul(key) or _holds_nul(item) for key, item in value.items())
-    if isinstance(value, list):
-        return any(_holds_nul(item) for item in value)
-    return False
-
-
 async def _answer_tools(
     run: RunRecord, result: TurnResult, prefix: ConversationPrefix
 ) -> _Outcome | None:
@@ -365,13 +355,13 @@ async def _answer_tools(
         return _failed(RunErrorCode.internal)
     # Checked before any tool runs or any event is written: a `tool_use` input must be an object
     # (the API refuses the stored turn otherwise, and stored history is never edited, so it would
-    # fail every later send) and must hold no NUL (the `tool_call` row cannot store it). The turn
-    # is dropped and the run fails, with nothing left started.
+    # fail every later send) and must hold nothing `jsonb_safe` refuses (the `tool_call` row cannot
+    # store it). The turn is dropped and the run fails, with nothing left started.
     if any(not isinstance(call.get("input"), dict) for call in calls):
         log.error("tool input is not an object", {"runId": run.id})
         return _failed(RunErrorCode.internal)
-    if any(_holds_nul(call["input"]) for call in calls):
-        log.error("tool input holds a NUL", {"runId": run.id})
+    if not all(jsonb_safe(call["input"]) for call in calls):
+        log.error("tool input cannot be stored (a NUL or a non-finite number)", {"runId": run.id})
         return _failed(RunErrorCode.internal)
     # The budget is spent here, before any call starts, from the rows already recorded: parallel
     # calls cannot race past it, and an approval's resume keeps the count.

@@ -18,6 +18,7 @@ from app.models.run.enums import ToolCallStatus
 from app.models.tool_policy.enums import PolicyEffect
 from app.services.anthropic import Block
 from app.services.db import execute, fetch_all
+from app.services.utils.jsonb import jsonb_safe
 from tests import fake_anthropic, fake_voyage
 from tests.agent_support import RecordingFake, bearer, send, start_conversation
 from tests.fake_mcp import KNOWLEDGE_HOST, Servers
@@ -284,10 +285,10 @@ class TestOddNames:
         "nested", [{"a": ["x\x00"]}, {"a\x00": 1}, {"a": {"b": [{"c": "\x00"}]}}]
     )
     def test_nul_is_found_in_any_depth_and_in_keys(self, nested: object) -> None:
-        assert agent._holds_nul(nested)
+        assert not jsonb_safe(nested)
 
     def test_an_input_without_nul_is_clean(self) -> None:
-        assert not agent._holds_nul({"a": ["x", {"b": "ü\n\t"}], "c": None, "d": 1})
+        assert jsonb_safe({"a": ["x", {"b": "ü\n\t"}], "c": None, "d": 1})
 
     async def test_a_prefix_that_never_offered_the_tool_denies_even_with_an_allow_row(
         self, client: httpx.AsyncClient

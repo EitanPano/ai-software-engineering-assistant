@@ -89,7 +89,9 @@ src/app/
                       eval: admin-run retrieval measurements, see Evals;
                       approval: routes, schema and controller only, its rows are the run
                       module's, see The agent;
-                      mcp_server, tool_policy: controller and service, no route, see The agent)
+                      mcp_server, tool_policy: admin-only routes (`/api/mcp-server`,
+                      `/api/tool-policy`), schema, controller and service; tool_policy's
+                      controller imports mcp_server's, never the reverse; see The agent)
   models/<name>/      interface · type · enums · constants (auth, session, user,
                       conversation, run, approval, source, search, eval, mcp_server, tool_policy)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
@@ -100,7 +102,7 @@ src/app/
                       mcp.py · github.py · voyage.py · chunk.py · parse.py · parse_worker.py
     security/         crypto · jwt · cookies · otp
     communicate/      __init__.py · console · mail · sms · whatsapp · templates/
-    utils/            error · openapi · clock · api_model · pagination · postgres_error · retrieval_metric (pure, no I/O)
+    utils/            error · openapi · clock · api_model · pagination · postgres_error · retrieval_metric · jsonb (pure, no I/O)
   infra/              dependency.py · loop.py · memory.py · postgres.py · pubsub.py · scheduler.py
     jobs/             one file per background job: session_cleanup
     subscribers/      one file per event reaction: send_welcome, execute_run, resume_run, index_source, execute_eval_run
@@ -425,7 +427,7 @@ changes only by plan.
   tool's own name; with no such row the id is null and `tool_name` is the model's name). A run
   spends at most `AGENT_TOOL_CALLS_PER_RUN` calls, counted from its `tool_call` rows before the
   turn's calls start; the rest are a fixed `is_error` result and no server call. An input holding
-  NUL fails the run (JSONB cannot store it) before anything is started.
+  anything `jsonb_safe` refuses fails the run (JSONB cannot store it) before anything is started.
 - The pin. `mcp_server.pinned_tool_definition` is what an admin accepted; `tool_definition` stays
   the last listing. Every server but `knowledge` offers only pinned tools whose live listing equals
   the pin (name, description, schema), the pin itself while the server is down, and nothing while
@@ -440,12 +442,35 @@ changes only by plan.
   backend-migrate python -m app.infra.scripts.accept_mcp_server github`): it prints the live
   listing whole, its digest and what changed from the pin (definitions compare as canonical JSON,
   so `0` and `false` differ), takes an exact `yes`, stores what it printed and enables the row;
-  anything else writes nothing and exits 1, as does a tool name outside `[A-Za-z0-9_-]+` or listed
-  twice (refused before anything of the listing is printed). `0011` seeds `github` disabled with
-  its seven `tool_policy` rows (reads `allow`, `issue_write` and `add_issue_comment` `ask`), so
-  nothing is offered before an accept and a policy is never edited by hand. A conversation started
-  before an accept or a re-pin keeps its frozen tools: start a new one. A result passes `MCP` limits as text:
-  embedded text joins the result, a blob stays out, and a cut output ends with a fixed note.
+  anything else writes nothing and exits 1, as does a listing `tool.listing_problem` refuses (no
+  tool, a name listed twice or outside `[A-Za-z0-9_-]+`; refused before anything of the listing is
+  printed) or one the store cannot hold (below).
+- The admin's doors (all `require_role(UserRole.admin)`, rechecked in each handler): `GET
+  /api/mcp-server` (newest first), `GET|PATCH /api/mcp-server/{id}` (`enabled`; enabling a third
+  party with no pin is a 409), `GET /api/mcp-server/{id}/listing` (the live read, stores nothing,
+  a disabled server included; every schema printed by the server as a string, `tool.printed_schema`)
+  and `POST /api/mcp-server/{id}/acceptance` (the digest of what was shown; the handler reads the
+  server live again, a different digest is a 409 that writes nothing, and it pins what it just
+  read). `McpServer.pinStatus` is `tool.pin_status` over stored rows, no call to any server.
+  `knowledge` has no pin: its review and accept are a 409. `GET /api/tool-policy/{mcpServerId}`
+  is one document (the union of the rows and the pin, `knowledge`: its last listing; a tool with no
+  row has `effect` null) and `PUT .../{toolName}` upserts one row: an unknown server or tool is a
+  404, checked before `tool.effects_for`, which on `github` offers `allow` only for
+  `GITHUB_ALLOWABLE_TOOLS` (the five reads of `0011`; a write, or a tool never seen, is `ask` or
+  `deny`, else a 400 that writes nothing). The loop reads `enabled` and `tool_policy` at each call
+  and at a resume, so a change needs no restart. Each write logs the account, server and tool or
+  digest, never a definition.
+- What the store cannot hold. JSONB refuses an escaped NUL and a non-finite number (`NaN`,
+  `Infinity`, `1e400`), which the SDK's parser lets through. `services/utils/jsonb.py ›
+  jsonb_safe` is the one check: a model's tool input (`_answer_tools`) and a listing
+  (`mcp.list_tools`, after its session returned, because `_session` rewrites anything raised inside
+  it) both pass it. A listing that fails is `McpUnavailable("unstorable_listing")`, so a run
+  offers the pin and writes the one notice, and the review and the accept answer 503.
+- Seeded policy. `0011` seeds `github` disabled with its seven `tool_policy` rows (reads `allow`,
+  `issue_write` and `add_issue_comment` `ask`), so nothing is offered before an accept and a policy
+  is never edited by hand. A conversation started before an accept or a re-pin keeps its frozen
+  tools: start a new one. A result passes `MCP` limits as text: embedded text joins the result, a
+  blob stays out, and a cut output ends with a fixed note.
 - The GitHub gateway (`app.github_gateway_main`, the `github-gateway` Compose service in profile
   `github`, port 8002, no published port; by hand `uv run poe github-gateway`). `github-mcp-server
   http` has no static token (it reads a PAT from each request's `Authorization`), so a plain service
@@ -512,12 +537,17 @@ changes only by plan.
   `python -m tests.fake_anthropic` process; `python -m tests.seed_ask_tool` (e2e database only)
   and `seed_ask_tool.seed` write its row, its pin and its `ask` policy, after `restore_seed`, which
   deletes it, and pin and enable `github` to the seven recorded tools. `lab` and `fixture` are
-  third party, so `register_lab` and the seed write a pin. `tests/fake_github_mcp.py` is a scripted
+  third party, so `register_lab` and the seed write a pin. `python -m tests.seed_changed_server
+  <name>` (a `_test` or `_e2e` database; the name is new, never `knowledge` or `github`) writes a
+  disabled third-party row at the fake's `/mcp` whose pin is an older `note` than its last listing
+  and a `note` policy at `ask`: the review journey's row. `tests/rewrite_app.py` swaps bytes in a
+  fake's answers, to send the `NaN` or `1e400` that pydantic would print as `null`.
+  `tests/fake_github_mcp.py` is a scripted
   `github-mcp-server` on the real transport (enforces its bearer and `x-mcp-header`, returns a file
   as an embedded resource) over `tests/github_tools.json`, the seven definitions recorded from
   `v2.0.3`; it runs in process (`Servers.github`, `accept_github`) and at `/github/mcp` in the
-  `python -m tests.fake_anthropic` process, and `[[github_comment]]` scripts the comment journey. `tests/test_approval_restart.py` kills a real API process during a pause.
-  `tests/knowledge_support.py` calls `knowledge` directly. The seeded `mcp_server` and
+  `python -m tests.fake_anthropic` process, and `[[github_comment]]` scripts the comment journey. `tests/test_approval_restart.py` kills a real API
+  process during a pause. `tests/knowledge_support.py` calls `knowledge` directly. The seeded `mcp_server` and
   `tool_policy` rows survive `reset_store()` (restored from the migration's own statements by
   `infra/scripts/mcp_seed.py`) and the e2e preparation.
 

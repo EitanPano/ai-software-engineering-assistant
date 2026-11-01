@@ -4,8 +4,10 @@ import { Outlet, type RouteObject } from 'react-router'
 import { conversationListQuery, conversationQuery } from '@/entity/conversation/api/conversation'
 import { evalRunListQuery, evalRunQuery } from '@/entity/eval-run/api/eval-run'
 import { healthQuery } from '@/entity/health/api/health'
+import { mcpServerListQuery, mcpServerQuery } from '@/entity/mcp-server/api/mcp-server'
 import { messageListQuery } from '@/entity/message/api/message'
 import { sourceListQuery } from '@/entity/source/api/source'
+import { toolPolicyQuery } from '@/entity/tool-policy/api/tool-policy'
 import { redirectIfSignedIn, requireAccount, requireRole, returnToOf } from '@/shared/auth/session'
 
 import AuthError from './(auth)/error'
@@ -24,6 +26,10 @@ import SiteLoading from './(site)/loading'
 import SiteNotFound from './(site)/not-found'
 import HomePage from './(site)/page'
 import ProfilePage from './(site)/profile/page'
+import ListingError from './(site)/mcp-server/[id]/listing/error'
+import ListingPage from './(site)/mcp-server/[id]/listing/page'
+import McpServerPage from './(site)/mcp-server/[id]/page'
+import McpServerListPage from './(site)/mcp-server/page'
 import SearchError from './(site)/search/error'
 import SearchPage from './(site)/search/page'
 import ConnectSourcePage from './(site)/source/connect/page'
@@ -128,6 +134,36 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                         return queryClient.query(evalRunQuery(params.id ?? ''))
                       },
                       Component: EvalRunPage,
+                    },
+                    {
+                      path: 'mcp-server',
+                      loader: async ({ request }) => {
+                        await requireRole(queryClient, 'admin', returnToOf(request))
+                        return queryClient.infiniteQuery(mcpServerListQuery())
+                      },
+                      Component: McpServerListPage,
+                    },
+                    {
+                      path: 'mcp-server/:id',
+                      loader: async ({ params, request }) => {
+                        await requireRole(queryClient, 'admin', returnToOf(request))
+                        const id = params.id ?? ''
+                        return Promise.all([
+                          queryClient.query(mcpServerQuery(id)),
+                          queryClient.query(toolPolicyQuery(id)),
+                        ])
+                      },
+                      Component: McpServerPage,
+                    },
+                    {
+                      // Prefetches nothing: this page alone calls a live server, and only when
+                      // the admin opens it. The widget suspends on the read; the segment's
+                      // boundary words a server that did not answer and a listing it refuses.
+                      path: 'mcp-server/:id/listing',
+                      loader: ({ request }) =>
+                        requireRole(queryClient, 'admin', returnToOf(request)),
+                      Component: ListingPage,
+                      ErrorBoundary: ListingError,
                     },
                   ],
                 },

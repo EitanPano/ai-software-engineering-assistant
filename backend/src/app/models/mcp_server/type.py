@@ -1,6 +1,6 @@
 """type.py belongs: shapes that several layers share and that are not stored records: a tool as a
 server lists it, and what one run's discovery found.
-It does not belong: the stored row (`interface.py`) or the wire (no route lists servers).
+It does not belong: the stored row (`interface.py`) or the wire (`api/mcp_server/schema.py`).
 """
 
 import json

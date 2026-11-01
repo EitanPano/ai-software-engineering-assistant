@@ -18,7 +18,6 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] admin can manage MCP servers and tool policy
 - [ ] a tool accepted later reaches existing conversations
 - [ ] agent remembers long-term knowledge across conversations
 - [ ] agent returns schema-validated structured results
@@ -47,6 +46,12 @@ Example: `- [ ] user can sign in with email`
 - [ ] connect is rate limited per admin
 - [ ] agent proposes a code change as a GitHub pull request
 - [ ] each user acts on GitHub with their own token
+- [ ] admin can add and remove a third-party MCP server
+- [ ] admin reads a changed tool definition as a word diff
+- [ ] a server's listing is read past its first page
+- [ ] admin sees who accepted a listing or changed a tool policy
+- [ ] reading or accepting a server's listing is rate limited per admin
+- [ ] e2e records the real exit code when vite preview dies
 
 ## DONE
 
@@ -64,3 +69,4 @@ Example: `- [ ] user can sign in with email`
 - [x] agent searches the knowledge base through our MCP server (2026-11-01, plan 010)
 - [x] user approves sensitive tool calls (2026-11-01, plan 011)
 - [x] agent acts on GitHub through the GitHub MCP server (2026-11-01, plan 012)
+- [x] admin can manage MCP servers and tool policy (2026-11-02, plan 013)

@@ -1,8 +1,7 @@
 """controller.py belongs: the rules the agent module and the accept command call to reach the MCP
 servers: list what each enabled server offers (`discover_tools`), find one by name (`find_server`),
 call one of its tools (`call_server_tool`), and an admin's accept of a third party's tools
-(`read_listing`, `accept_listing`). `mcp_server` has no route: no acceptance criterion asks for
-one, and the `knowledge` and `github` rows ship in migrations.
+(`read_listing`, `accept_listing`), and the admin's handlers over them.
 It does not belong: queries (`service.py`) or the protocol (`services/mcp.py`).
 
 Servers are listed concurrently, each in a session of its own. `knowledge`'s and `github`'s
@@ -16,17 +15,39 @@ is not even listed. A call lists again in its own session and calls nothing on a
 """
 
 import asyncio
+from typing import Annotated, assert_never
+
+from fastapi import Query, Request
+from pydantic import MISSING
 
 from app.api.mcp_server import service
+from app.api.mcp_server.schema import (
+    AcceptListingBody,
+    ListingTool,
+    McpServer,
+    McpServerId,
+    McpServerListing,
+    McpServerPage,
+    PinStatusName,
+    ToolChangeName,
+    UpdateMcpServerBody,
+)
 from app.config.env import env
+from app.middleware.auth import require_caller
+from app.models.auth.type import Caller
 from app.models.mcp_server.constants import GITHUB_SERVER, KNOWLEDGE_SERVER
+from app.models.mcp_server.enums import PinStatus, ToolChange
 from app.models.mcp_server.interface import McpServerRecord
 from app.models.mcp_server.type import Discovery, ListedTool, ToolOutcome, same_definition
 from app.models.run.enums import ToolCallStatus
-from app.services import mcp
+from app.models.user.enums import UserRole
+from app.services import mcp, tool
 from app.services.logger import log
 from app.services.mcp import McpUnavailable, ToolDefinitionChanged
+from app.services.security.crypto import constant_time_equals
 from app.services.utils import clock
+from app.services.utils.error import AppError
+from app.services.utils.pagination import PageQuery
 
 _UNAVAILABLE_OUTPUT = "the tool is unavailable"
 # The agent's own policy text for a denied call, so the model reads one wording for every refusal.
@@ -151,5 +172,174 @@ async def read_listing(server: McpServerRecord) -> list[ListedTool] | None:
 async def accept_listing(server: McpServerRecord, tools: list[ListedTool]) -> None:
     """System operation: an admin accepted exactly `tools` (what `read_listing` returned and the
     admin read). They become the pin and the last listing and the server is enabled; a policy row is
-    never touched. Only `infra/scripts/accept_mcp_server.py` calls this."""
+    never touched. The accept handler and `infra/scripts/accept_mcp_server.py` call this."""
     await service.save_pin(server.id, tools, clock.now())
+
+
+def _assert_admin(caller: Caller) -> None:
+    if caller.role is not UserRole.admin:
+        raise AppError("forbidden", "insufficient role")
+
+
+async def find_server_by_id(server_id: str) -> McpServerRecord | None:
+    """System operation: the server with this id, enabled or not."""
+    return await service.find_by_id(server_id)
+
+
+def known_tool_names(server: McpServerRecord) -> set[str]:
+    """The tools a server is known to offer: its pin, or for `knowledge` (which has none) its last
+    listing. A policy is set only for a tool known here or one that already has a row."""
+    listing = (
+        server.tool_definition if server.name == KNOWLEDGE_SERVER else server.pinned_tool_definition
+    )
+    return {t.name for t in listing or []}
+
+
+def _wire_pin_status(status: PinStatus) -> PinStatusName:
+    """The edge between the domain enum and the wire's literal; `match` makes mypy fail here when
+    a member is added to one and not the other."""
+    match status:
+        case PinStatus.not_required:
+            return "not_required"
+        case PinStatus.unpinned:
+            return "unpinned"
+        case PinStatus.current:
+            return "current"
+        case PinStatus.changed:
+            return "changed"
+        case _:
+            assert_never(status)
+
+
+def _wire_change(change: ToolChange) -> ToolChangeName:
+    match change:
+        case ToolChange.added:
+            return "added"
+        case ToolChange.removed:
+            return "removed"
+        case ToolChange.changed:
+            return "changed"
+        case ToolChange.unchanged:
+            return "unchanged"
+        case _:
+            assert_never(change)
+
+
+def _to_wire(server: McpServerRecord) -> McpServer:
+    """No URL, no token and no tool count: the row's address is the environment's business."""
+    return McpServer(
+        id=server.id,
+        name=server.name,
+        enabled=server.enabled,
+        pin_status=_wire_pin_status(tool.pin_status(server)),
+        created_at=clock.to_iso(server.created_at),
+        updated_at=clock.to_iso(server.updated_at),
+    )
+
+
+async def _find_or_404(server_id: str) -> McpServerRecord:
+    server = await service.find_by_id(server_id)
+    if server is None:
+        raise AppError("not_found", "mcp server not found")
+    return server
+
+
+async def _read_for_review(server: McpServerRecord) -> list[ListedTool]:
+    """The live listing an admin may review or accept, or the error that says why not: `knowledge`
+    has no pin (409), a server that did not answer or whose listing the store cannot hold is a 503,
+    and a listing `tool.listing_problem` refuses is a 409 that names no tool."""
+    if server.name == KNOWLEDGE_SERVER:
+        raise AppError("conflict", "this server has no pin to review")
+    live = await read_listing(server)
+    if live is None:
+        raise AppError("upstream_unavailable", "the server did not answer")
+    problem = tool.listing_problem(live)
+    if problem is not None:
+        raise AppError("conflict", problem)
+    return live
+
+
+def _review_items(server: McpServerRecord, live: list[ListedTool]) -> list[ListingTool]:
+    pinned = {t.name: t for t in server.pinned_tool_definition or []}
+    shown = {t.name: t for t in live}
+    items: list[ListingTool] = []
+    for name, change in tool.tool_changes(server.pinned_tool_definition, live).items():
+        now = shown.get(name)
+        before = pinned.get(name) if change in (ToolChange.changed, ToolChange.removed) else None
+        items.append(
+            ListingTool(
+                name=name,
+                change=_wire_change(change),
+                description=None if now is None else now.description,
+                input_schema=None if now is None else tool.printed_schema(now.input_schema),
+                pinned_description=None if before is None else before.description,
+                pinned_input_schema=(
+                    None if before is None else tool.printed_schema(before.input_schema)
+                ),
+            )
+        )
+    return items
+
+
+async def list_mcp_server(request: Request, query: Annotated[PageQuery, Query()]) -> McpServerPage:
+    _assert_admin(require_caller(request))
+    page = await service.list_page(
+        cursor=None if query.cursor is MISSING else query.cursor, limit=query.limit
+    )
+    return McpServerPage(
+        items=[_to_wire(server) for server in page.items], next_cursor=page.next_cursor
+    )
+
+
+async def get_mcp_server(request: Request, server_id: McpServerId) -> McpServer:
+    _assert_admin(require_caller(request))
+    return _to_wire(await _find_or_404(server_id))
+
+
+async def update_mcp_server(
+    request: Request, server_id: McpServerId, body: UpdateMcpServerBody
+) -> McpServer:
+    caller = require_caller(request)
+    _assert_admin(caller)
+    server = await service.set_enabled(server_id, body.enabled, clock.now())
+    if server is None:
+        await _find_or_404(server_id)
+        raise AppError("conflict", "a server with no accepted listing cannot be enabled")
+    log.info(
+        "mcp server enabled changed",
+        {"account": caller.id, "server": server.name, "enabled": server.enabled},
+    )
+    return _to_wire(server)
+
+
+async def get_mcp_server_listing(request: Request, server_id: McpServerId) -> McpServerListing:
+    """Reads the server live and stores nothing, a disabled server included."""
+    _assert_admin(require_caller(request))
+    server = await _find_or_404(server_id)
+    live = await _read_for_review(server)
+    return McpServerListing(
+        mcp_server_id=server.id,
+        listing_digest=tool.listing_digest(live),
+        items=_review_items(server, live),
+    )
+
+
+async def accept_mcp_server_listing(
+    request: Request, server_id: McpServerId, body: AcceptListingBody
+) -> McpServer:
+    """Pins exactly the listing the admin was shown. The server is read live again; a listing whose
+    digest differs from the one shown is a 409 that writes nothing, and what is pinned is what was
+    just read, never anything the browser sent."""
+    caller = require_caller(request)
+    _assert_admin(caller)
+    server = await _find_or_404(server_id)
+    live = await _read_for_review(server)
+    digest = tool.listing_digest(live)
+    if not constant_time_equals(digest, body.listing_digest):
+        raise AppError("conflict", "the listing changed since it was shown")
+    await accept_listing(server, live)
+    log.info(
+        "mcp server listing accepted",
+        {"account": caller.id, "server": server.name, "digest": digest, "tools": len(live)},
+    )
+    return _to_wire(await _find_or_404(server_id))

@@ -17,6 +17,7 @@ from tests.approval_support import LabBacked
 from tests.fake_github_mcp import recorded_tools
 from tests.fake_mcp import GITHUB_HOST, LAB_TOOLS, Servers
 from tests.fake_mcp import mcp_servers as mcp_servers
+from tests.rewrite_app import Rewrite
 from tests.store import store_backed
 from tests.support import recording_logger
 from tests.test_agent import Journey
@@ -202,6 +203,28 @@ class TestRefusals(LabBacked):
 
         assert await run(["github"]) == 1
 
+        assert (await row()).pinned_tool_definition is None
+
+    @pytest.mark.parametrize(
+        ("schema", "swaps"),
+        [
+            ({"type": "object", "title": "a\x00b"}, {}),
+            ({"type": "object", "default": "@@"}, {b'"@@"': b"NaN"}),
+            ({"type": "object", "default": "@@"}, {b'"@@"': b"Infinity"}),
+            ({"type": "object", "default": "@@"}, {b'"@@"': b"1e400"}),
+        ],
+        ids=["nul", "nan", "infinity", "overflow"],
+    )
+    async def test_what_the_store_cannot_hold_exits_1_and_writes_nothing(
+        self, servers: Servers, schema: dict[str, object], swaps: dict[bytes, bytes]
+    ) -> None:
+        servers.github.tools[:] = [ListedTool(name="odd", description="d", input_schema=schema)]
+        servers.hosts.apps[GITHUB_HOST] = Rewrite(servers.hosts.apps[GITHUB_HOST], swaps)  # type: ignore[assignment]
+        run = Run()
+
+        assert await run(["github"]) == 1
+
+        assert (run.asked, run.printed) == (0, [])
         assert (await row()).pinned_tool_definition is None
 
     async def test_a_tool_name_with_terminal_escapes_is_refused_before_anything_is_printed(

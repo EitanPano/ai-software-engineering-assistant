@@ -55,7 +55,10 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
    any other row's URL from the row. Every server but `knowledge` offers only pinned tools whose
    live listing matches, by canonical JSON, and the pin itself while the server is down. A changed
    definition is denied at discovery, in the call's gates and in `call_tool`, which lists again in
-   the call's own session, so a change during a long approval is caught. `strict` stays on
+   the call's own session, so a change during a long approval is caught. An admin changes all of
+   this through `/api/mcp-server` and `/api/tool-policy`: `enabled` and each tool's effect apply at
+   the next call, an accept pins exactly the live listing whose digest the review showed, and on
+   `github` only the five reads in `GITHUB_ALLOWABLE_TOOLS` may be `allow`. `strict` stays on
    `knowledge`: a third-party schema is sent as accepted, and `validate_input` checks every input.
    A conversation stores its system prompt and tool definitions at its first run and replays
    those bytes, because thinking blocks are bound to them, so a later tool reaches only new
@@ -230,6 +233,18 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-11-02: an admin manages MCP servers and tool policy, the first admin control over the tool
+  gate. New routes, each `require_role(admin)` and rechecked in its handler: `GET /api/mcp-server`,
+  `GET` and `PATCH /api/mcp-server/{id}`, `GET /api/mcp-server/{id}/listing`,
+  `POST /api/mcp-server/{id}/acceptance`, `GET /api/tool-policy/{mcpServerId}` and
+  `PUT /api/tool-policy/{mcpServerId}/{toolName}`. The review reads the server live and writes
+  nothing; the accept echoes `listingDigest`, reads again and pins what it just read, so a
+  difference is a 409 that writes nothing. Enabling a third party with no pin is a 409, and no URL
+  or token reaches the wire. `GITHUB_ALLOWABLE_TOOLS` holds `allow` on `github` to `0011`'s five
+  reads; any other tool there can only be `ask` or `deny`. `list_tools` refuses what JSONB cannot
+  store (`unstorable_listing`), so such a listing reads as a server that did not answer and a run
+  offers the pin. `accept_mcp_server` stays for a shell and shares one rule, `listing_problem`, with
+  the screen. No migration.
 - 2026-11-01: the agent acts on GitHub through GitHub's official MCP server, the first third-party
   server, opt-in under the Compose profile `github`. No public route changes. A new process,
   `python -m app.github_gateway_main`, is a new auth boundary and the only holder of

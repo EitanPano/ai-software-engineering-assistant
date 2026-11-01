@@ -6,6 +6,7 @@ import { NAV } from '../../src/app/nav'
 
 import { fillSignIn, registerThroughUi, signOutThroughUi } from './auth-support'
 import { COMPLETED, completedRun, grantAdminWithCases, startRun } from './eval-run-support'
+import { openServer } from './mcp-server-support'
 import { capturedRoutes } from './screen-routes'
 import { LONG_LINE_QUERY, expectHit } from './search-support'
 import { REPOSITORY, connectRepository, grantAdmin, sourceRow, uniqueToken } from './source-support'
@@ -54,6 +55,31 @@ const SIGNED_IN_ROUTES: {
   },
   { route: '/source/connect', setup: grantAdmin },
   { route: '/eval-run', setup: grantAdmin },
+  // The MCP servers, read only over the seeded `github` server and its seven recorded tools, the
+  // longest real text there is. `/mcp-server-detail` and `/mcp-server-listing` only name the
+  // files; the id is read from the list.
+  { route: '/mcp-server', setup: grantAdmin },
+  {
+    route: '/mcp-server-detail',
+    setup: grantAdmin,
+    prepare: async (page) => {
+      await openServer(page, 'github')
+      await expect(page).toHaveURL(/\/mcp-server\/[^/]+$/)
+      await expect(page.getByRole('combobox').first()).toBeVisible()
+      return new URL(page.url()).pathname
+    },
+  },
+  {
+    route: '/mcp-server-listing',
+    setup: grantAdmin,
+    prepare: async (page) => {
+      await openServer(page, 'github')
+      await page.getByRole('link', { name: 'Review listing' }).click()
+      await expect(page).toHaveURL(/\/mcp-server\/[^/]+\/listing$/)
+      await expect(page.getByRole('heading', { level: 3 }).first()).toBeVisible()
+      return new URL(page.url()).pathname
+    },
+  },
   {
     // A completed run's record: the account is promoted and the database gets the fixture's
     // cases, a fixture repository is connected, one run is started and opened. `/eval-run-detail`

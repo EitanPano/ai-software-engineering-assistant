@@ -25,12 +25,12 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 
 ## Features
 
-- Multiple MCP servers: our own `knowledge` server gives the agent its search, and GitHub's official server, which you opt into, lets it read and act on GitHub; a third-party server's tools are pinned when an admin accepts them, and a changed definition is denied
+- Multiple MCP servers: our own `knowledge` server gives the agent its search, and GitHub's official server, which you opt into, lets it read and act on GitHub; a third-party server's tools are pinned when an admin reads and accepts them on the MCP servers screen, a changed definition is denied until they accept it again, and an admin can turn a server off
 - Knowledge sources: an admin connects a public GitHub repository, indexed by symbol and embedded
 - Hybrid RAG: semantic and keyword search over connected GitHub repositories
 - Agentic RAG: the agent decides when to search, searches again when a result does not answer, and cites file and line
 - Persistent agent memory: conversation history distinct from long-term knowledge (planned)
-- Tool execution permissions: a tool set to `ask` waits for a person to approve its exact arguments, across a restart, and writing an issue or a comment on GitHub is such a tool
+- Tool execution permissions: an admin sets each tool to allow, ask or deny; a tool set to `ask` waits for a person to approve its exact arguments, across a restart, and writing an issue or a comment on GitHub can never be set to allow
 - Streaming responses: intermediate tool activity shown as it happens
 - Evaluation pipelines: an admin measures retrieval quality with an eval run; answer correctness (planned)
 - Structured outputs: results validated against schemas (planned)
@@ -143,7 +143,8 @@ GITHUB_MCP_TOKEN=<a random string of at least 32 characters>
 ```
 
 Add the same `GITHUB_MCP_TOKEN` to `backend/.env`, then start the two GitHub services and accept the
-server's tools. The accept prints every tool whole and stores what you read after your yes.
+server's tools as an admin, on the MCP servers screen: it shows every tool whole and pins exactly
+what you read. The `accept_mcp_server` command does the same from a shell, after your yes.
 
 ```bash
 # GitHub's server, in Docker, with no token of its own
@@ -153,6 +154,7 @@ cd backend
 uv run --env-file .env.github poe github-gateway
 # once, in another terminal
 uv run poe migrate
+# with the API running, accept on the screen; or from a shell:
 uv run --env-file .env python -m app.infra.scripts.accept_mcp_server github
 # optional and free: check the real server, with no model turn
 uv run --env-file .env python -m tests.live_github
@@ -171,7 +173,8 @@ Three things to expect:
 
 - A conversation keeps the tools it started with, so start a new one after an accept. An older
   conversation never gets GitHub, and one started before a changed definition was accepted is
-  denied that tool.
+  denied that tool. The same holds for any server: a conversation started while it is off never
+  gets its tools.
 - If GitHub changes a tool's definition, for example after a new image, that tool is denied until
   you accept it again.
 - Lockdown mode is on, because repository text can try to steer the agent. On a public repository,

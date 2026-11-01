@@ -3,14 +3,51 @@ directory: only its `controller.py` imports it. Rows are plain records.
 It does not belong: business rules, calls to a server or error mapping (`controller.py`).
 """
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Annotated, Final, LiteralString
 
 from psycopg.types.json import Jsonb
+from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, field_validator
 
+from app.models.mcp_server.constants import KNOWLEDGE_SERVER
 from app.models.mcp_server.interface import McpServerRecord
 from app.models.mcp_server.type import ListedTool
 from app.services.db import Executor, execute, fetch_all, fetch_one
+from app.services.utils.pagination import Slice, decode_cursor, encode_cursor, to_page
+
+_COLUMNS: Final[LiteralString] = (
+    "id, name, url, enabled, tool_definition, pinned_tool_definition, created_at, updated_at"
+)
+_SELECT: Final[LiteralString] = "select " + _COLUMNS + " from mcp_server "  # noqa: S608
+_ISO: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T.+")
+
+
+def _iso_text(value: object) -> object:
+    if isinstance(value, str) and _ISO.fullmatch(value):
+        return datetime.fromisoformat(value)
+    raise ValueError("must be an ISO 8601 timestamp")
+
+
+class ServerCursor(BaseModel):
+    """The sort key of the server list: (created_at, id), newest first."""
+
+    model_config = ConfigDict(strict=True)
+
+    created_at: Annotated[AwareDatetime, BeforeValidator(_iso_text)]
+    id: str
+
+    @field_validator("id")
+    @classmethod
+    def _no_nul(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("must not hold a NUL")
+        return value
+
+
+def _cursor_of(record: McpServerRecord) -> str:
+    return encode_cursor({"created_at": record.created_at.isoformat(), "id": record.id})
 
 
 @dataclass(frozen=True)
@@ -74,6 +111,54 @@ async def list_enabled(*, db: Executor | None = None) -> list[McpServerRecord]:
     return [_to_record(row) for row in rows]
 
 
+async def list_page(
+    *, cursor: str | None, limit: int, db: Executor | None = None
+) -> Slice[McpServerRecord]:
+    """Newest first, paged by `(created_at, id)`; a malformed cursor is a 400."""
+    after = None if cursor is None else decode_cursor(cursor, ServerCursor)
+    if after is None:
+        rows = await fetch_all(
+            _ServerRow,
+            _SELECT + "order by created_at desc, id desc limit %s",
+            (limit + 1,),
+            db=db,
+        )
+    else:
+        rows = await fetch_all(
+            _ServerRow,
+            _SELECT
+            + "where (created_at, id) < (%s, %s) order by created_at desc, id desc limit %s",
+            (after.created_at, after.id, limit + 1),
+            db=db,
+        )
+    return to_page([_to_record(row) for row in rows], limit, _cursor_of)
+
+
+async def find_by_id(server_id: str, *, db: Executor | None = None) -> McpServerRecord | None:
+    if "\x00" in server_id:  # a text column cannot hold it, so no row can match
+        return None
+    row = await fetch_one(_ServerRow, _SELECT + "where id = %s", (server_id,), db=db)
+    return None if row is None else _to_record(row)
+
+
+async def set_enabled(
+    server_id: str, enabled: bool, now: datetime, *, db: Executor | None = None
+) -> McpServerRecord | None:
+    """Turns a server on or off and returns the row. Enabling a third party with no pin writes
+    nothing and returns `None`, in the statement itself: a pin is never undone, so the check cannot
+    race. `None` is also an unknown id; the caller tells them apart."""
+    if "\x00" in server_id:
+        return None
+    row = await fetch_one(
+        _ServerRow,
+        "update mcp_server set enabled = %s, updated_at = %s where id = %s "  # noqa: S608
+        "and (not %s or name = %s or pinned_tool_definition is not null) returning " + _COLUMNS,
+        (enabled, now, server_id, enabled, KNOWLEDGE_SERVER),
+        db=db,
+    )
+    return None if row is None else _to_record(row)
+
+
 async def find_by_name(name: str, *, db: Executor | None = None) -> McpServerRecord | None:
     row = await fetch_one(
         _ServerRow,
@@ -88,8 +173,8 @@ async def find_by_name(name: str, *, db: Executor | None = None) -> McpServerRec
 async def save_listing(
     server_id: str, tools: list[ListedTool], now: datetime, *, db: Executor | None = None
 ) -> None:
-    """Keeps the last good listing of a server; an unchanged one writes nothing, so `updated_at`
-    means "the listing changed" and concurrent runs do not queue on the row."""
+    """Keeps the last good listing of a server; an unchanged one writes nothing, so concurrent runs
+    do not queue on the row."""
     document = _document(tools)
     await execute(
         "update mcp_server set tool_definition = %s, updated_at = %s "

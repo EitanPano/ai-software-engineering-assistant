@@ -5,6 +5,13 @@ export type ClientOptions = {
 }
 
 /**
+ * AcceptListingBody
+ */
+export type AcceptListingBody = {
+  listingDigest: string
+}
+
+/**
  * Accepted
  */
 export type Accepted = {
@@ -362,6 +369,33 @@ export type HealthResponse = {
 }
 
 /**
+ * ListingTool
+ */
+export type ListingTool = {
+  /**
+   * Name
+   */
+  name: string
+  change: 'added' | 'removed' | 'changed' | 'unchanged'
+  /**
+   * Description
+   */
+  description: string | null
+  /**
+   * Inputschema
+   */
+  inputSchema: string | null
+  /**
+   * Pinneddescription
+   */
+  pinnedDescription: string | null
+  /**
+   * Pinnedinputschema
+   */
+  pinnedInputSchema: string | null
+}
+
+/**
  * LogoutBody
  */
 export type LogoutBody = {
@@ -369,6 +403,59 @@ export type LogoutBody = {
    * All
    */
   all?: boolean
+}
+
+/**
+ * McpServer
+ */
+export type McpServer = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Enabled
+   */
+  enabled: boolean
+  pinStatus: 'not_required' | 'unpinned' | 'current' | 'changed'
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * McpServerListing
+ */
+export type McpServerListing = {
+  /**
+   * Mcpserverid
+   */
+  mcpServerId: string
+  /**
+   * Listingdigest
+   */
+  listingDigest: string
+  /**
+   * Items
+   */
+  items: Array<ListingTool>
+}
+
+/**
+ * McpServerPage
+ */
+export type McpServerPage = {
+  /**
+   * Items
+   */
+  items: Array<McpServer>
+  /**
+   * Nextcursor
+   */
+  nextCursor: string | null
 }
 
 /**
@@ -776,6 +863,13 @@ export type SentMessage = {
 }
 
 /**
+ * SetToolPolicyBody
+ */
+export type SetToolPolicyBody = {
+  effect: 'allow' | 'ask' | 'deny'
+}
+
+/**
  * Source
  */
 export type Source = {
@@ -827,6 +921,45 @@ export type SourcePage = {
    * Nextcursor
    */
   nextCursor: string | null
+}
+
+/**
+ * ToolPolicy
+ */
+export type ToolPolicy = {
+  /**
+   * Toolname
+   */
+  toolName: string
+  effect: 'allow' | 'ask' | 'deny' | null
+  /**
+   * Effects
+   */
+  effects: Array<'allow' | 'ask' | 'deny'>
+}
+
+/**
+ * ToolPolicySet
+ */
+export type ToolPolicySet = {
+  /**
+   * Mcpserverid
+   */
+  mcpServerId: string
+  /**
+   * Items
+   */
+  items: Array<ToolPolicy>
+}
+
+/**
+ * UpdateMcpServerBody
+ */
+export type UpdateMcpServerBody = {
+  /**
+   * Enabled
+   */
+  enabled: boolean
 }
 
 /**
@@ -1941,3 +2074,348 @@ export type GetApiEvalRunByIdResponses = {
 }
 
 export type GetApiEvalRunByIdResponse = GetApiEvalRunByIdResponses[keyof GetApiEvalRunByIdResponses]
+
+export type GetApiMcpServerData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Cursor
+     */
+    cursor?: string
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: '/api/mcp-server'
+}
+
+export type GetApiMcpServerErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiMcpServerError = GetApiMcpServerErrors[keyof GetApiMcpServerErrors]
+
+export type GetApiMcpServerResponses = {
+  /**
+   * A page of MCP servers, newest first
+   */
+  200: McpServerPage
+}
+
+export type GetApiMcpServerResponse = GetApiMcpServerResponses[keyof GetApiMcpServerResponses]
+
+export type GetApiMcpServerByIdData = {
+  body?: never
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/mcp-server/{id}'
+}
+
+export type GetApiMcpServerByIdErrors = {
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiMcpServerByIdError = GetApiMcpServerByIdErrors[keyof GetApiMcpServerByIdErrors]
+
+export type GetApiMcpServerByIdResponses = {
+  /**
+   * The MCP server
+   */
+  200: McpServer
+}
+
+export type GetApiMcpServerByIdResponse =
+  GetApiMcpServerByIdResponses[keyof GetApiMcpServerByIdResponses]
+
+export type PatchApiMcpServerByIdData = {
+  body?: UpdateMcpServerBody
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/mcp-server/{id}'
+}
+
+export type PatchApiMcpServerByIdErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type PatchApiMcpServerByIdError =
+  PatchApiMcpServerByIdErrors[keyof PatchApiMcpServerByIdErrors]
+
+export type PatchApiMcpServerByIdResponses = {
+  /**
+   * The MCP server, enabled or disabled
+   */
+  200: McpServer
+}
+
+export type PatchApiMcpServerByIdResponse =
+  PatchApiMcpServerByIdResponses[keyof PatchApiMcpServerByIdResponses]
+
+export type GetApiMcpServerByIdListingData = {
+  body?: never
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/mcp-server/{id}/listing'
+}
+
+export type GetApiMcpServerByIdListingErrors = {
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+  /**
+   * Upstream unavailable
+   */
+  503: ErrorBody
+}
+
+export type GetApiMcpServerByIdListingError =
+  GetApiMcpServerByIdListingErrors[keyof GetApiMcpServerByIdListingErrors]
+
+export type GetApiMcpServerByIdListingResponses = {
+  /**
+   * The server's live listing against its pin, to read before accepting
+   */
+  200: McpServerListing
+}
+
+export type GetApiMcpServerByIdListingResponse =
+  GetApiMcpServerByIdListingResponses[keyof GetApiMcpServerByIdListingResponses]
+
+export type PostApiMcpServerByIdAcceptanceData = {
+  body?: AcceptListingBody
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/mcp-server/{id}/acceptance'
+}
+
+export type PostApiMcpServerByIdAcceptanceErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Conflict
+   */
+  409: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+  /**
+   * Upstream unavailable
+   */
+  503: ErrorBody
+}
+
+export type PostApiMcpServerByIdAcceptanceError =
+  PostApiMcpServerByIdAcceptanceErrors[keyof PostApiMcpServerByIdAcceptanceErrors]
+
+export type PostApiMcpServerByIdAcceptanceResponses = {
+  /**
+   * The MCP server, pinned to the listing that was shown, and enabled
+   */
+  200: McpServer
+}
+
+export type PostApiMcpServerByIdAcceptanceResponse =
+  PostApiMcpServerByIdAcceptanceResponses[keyof PostApiMcpServerByIdAcceptanceResponses]
+
+export type GetApiToolPolicyByMcpServerIdData = {
+  body?: never
+  path: {
+    /**
+     * Mcpserverid
+     */
+    mcpServerId: string
+  }
+  query?: never
+  url: '/api/tool-policy/{mcpServerId}'
+}
+
+export type GetApiToolPolicyByMcpServerIdErrors = {
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiToolPolicyByMcpServerIdError =
+  GetApiToolPolicyByMcpServerIdErrors[keyof GetApiToolPolicyByMcpServerIdErrors]
+
+export type GetApiToolPolicyByMcpServerIdResponses = {
+  /**
+   * The policy of every tool the server is known to offer
+   */
+  200: ToolPolicySet
+}
+
+export type GetApiToolPolicyByMcpServerIdResponse =
+  GetApiToolPolicyByMcpServerIdResponses[keyof GetApiToolPolicyByMcpServerIdResponses]
+
+export type PutApiToolPolicyByMcpServerIdByToolNameData = {
+  body?: SetToolPolicyBody
+  path: {
+    /**
+     * Mcpserverid
+     */
+    mcpServerId: string
+    /**
+     * Toolname
+     */
+    toolName: string
+  }
+  query?: never
+  url: '/api/tool-policy/{mcpServerId}/{toolName}'
+}
+
+export type PutApiToolPolicyByMcpServerIdByToolNameErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Forbidden
+   */
+  403: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type PutApiToolPolicyByMcpServerIdByToolNameError =
+  PutApiToolPolicyByMcpServerIdByToolNameErrors[keyof PutApiToolPolicyByMcpServerIdByToolNameErrors]
+
+export type PutApiToolPolicyByMcpServerIdByToolNameResponses = {
+  /**
+   * The tool's policy, created or changed
+   */
+  200: ToolPolicy
+}
+
+export type PutApiToolPolicyByMcpServerIdByToolNameResponse =
+  PutApiToolPolicyByMcpServerIdByToolNameResponses[keyof PutApiToolPolicyByMcpServerIdByToolNameResponses]

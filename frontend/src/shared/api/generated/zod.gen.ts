@@ -3,6 +3,13 @@
 import * as z from 'zod'
 
 /**
+ * AcceptListingBody
+ */
+export const zAcceptListingBody = z.object({
+  listingDigest: z.string().regex(/^[0-9a-f]{64}$/),
+})
+
+/**
  * Accepted
  */
 export const zAccepted = z.record(z.string(), z.unknown())
@@ -216,10 +223,51 @@ export const zHealthResponse = z.object({
 })
 
 /**
+ * ListingTool
+ */
+export const zListingTool = z.object({
+  name: z.string(),
+  change: z.enum(['added', 'removed', 'changed', 'unchanged']),
+  description: z.string().nullable(),
+  inputSchema: z.string().nullable(),
+  pinnedDescription: z.string().nullable(),
+  pinnedInputSchema: z.string().nullable(),
+})
+
+/**
  * LogoutBody
  */
 export const zLogoutBody = z.object({
   all: z.boolean().optional().default(false),
+})
+
+/**
+ * McpServer
+ */
+export const zMcpServer = z.object({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  pinStatus: z.enum(['not_required', 'unpinned', 'current', 'changed']),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+})
+
+/**
+ * McpServerListing
+ */
+export const zMcpServerListing = z.object({
+  mcpServerId: z.string(),
+  listingDigest: z.string(),
+  items: z.array(zListingTool),
+})
+
+/**
+ * McpServerPage
+ */
+export const zMcpServerPage = z.object({
+  items: z.array(zMcpServer),
+  nextCursor: z.string().nullable(),
 })
 
 /**
@@ -469,6 +517,13 @@ export const zSentMessage = z.object({
 })
 
 /**
+ * SetToolPolicyBody
+ */
+export const zSetToolPolicyBody = z.object({
+  effect: z.enum(['allow', 'ask', 'deny']),
+})
+
+/**
  * Source
  */
 export const zSource = z.object({
@@ -498,6 +553,30 @@ export const zSource = z.object({
 export const zSourcePage = z.object({
   items: z.array(zSource),
   nextCursor: z.string().nullable(),
+})
+
+/**
+ * ToolPolicy
+ */
+export const zToolPolicy = z.object({
+  toolName: z.string(),
+  effect: z.enum(['allow', 'ask', 'deny']).nullable(),
+  effects: z.array(z.enum(['allow', 'ask', 'deny'])),
+})
+
+/**
+ * ToolPolicySet
+ */
+export const zToolPolicySet = z.object({
+  mcpServerId: z.string(),
+  items: z.array(zToolPolicy),
+})
+
+/**
+ * UpdateMcpServerBody
+ */
+export const zUpdateMcpServerBody = z.object({
+  enabled: z.boolean(),
 })
 
 /**
@@ -733,3 +812,74 @@ export const zGetApiEvalRunByIdPath = z.object({
  * One eval run with its scores and cases
  */
 export const zGetApiEvalRunByIdResponse = zEvalRunDetail
+
+export const zGetApiMcpServerQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.int().gte(1).lte(100).optional().default(20),
+})
+
+/**
+ * A page of MCP servers, newest first
+ */
+export const zGetApiMcpServerResponse = zMcpServerPage
+
+export const zGetApiMcpServerByIdPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The MCP server
+ */
+export const zGetApiMcpServerByIdResponse = zMcpServer
+
+export const zPatchApiMcpServerByIdBody = zUpdateMcpServerBody
+
+export const zPatchApiMcpServerByIdPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The MCP server, enabled or disabled
+ */
+export const zPatchApiMcpServerByIdResponse = zMcpServer
+
+export const zGetApiMcpServerByIdListingPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The server's live listing against its pin, to read before accepting
+ */
+export const zGetApiMcpServerByIdListingResponse = zMcpServerListing
+
+export const zPostApiMcpServerByIdAcceptanceBody = zAcceptListingBody
+
+export const zPostApiMcpServerByIdAcceptancePath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The MCP server, pinned to the listing that was shown, and enabled
+ */
+export const zPostApiMcpServerByIdAcceptanceResponse = zMcpServer
+
+export const zGetApiToolPolicyByMcpServerIdPath = z.object({
+  mcpServerId: z.string().min(1),
+})
+
+/**
+ * The policy of every tool the server is known to offer
+ */
+export const zGetApiToolPolicyByMcpServerIdResponse = zToolPolicySet
+
+export const zPutApiToolPolicyByMcpServerIdByToolNameBody = zSetToolPolicyBody
+
+export const zPutApiToolPolicyByMcpServerIdByToolNamePath = z.object({
+  mcpServerId: z.string().min(1),
+  toolName: z.string().min(1),
+})
+
+/**
+ * The tool's policy, created or changed
+ */
+export const zPutApiToolPolicyByMcpServerIdByToolNameResponse = zToolPolicy

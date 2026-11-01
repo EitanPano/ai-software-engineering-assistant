@@ -31,6 +31,15 @@ import type {
   GetApiHealthReadyErrors,
   GetApiHealthReadyResponses,
   GetApiHealthResponses,
+  GetApiMcpServerByIdData,
+  GetApiMcpServerByIdErrors,
+  GetApiMcpServerByIdListingData,
+  GetApiMcpServerByIdListingErrors,
+  GetApiMcpServerByIdListingResponses,
+  GetApiMcpServerByIdResponses,
+  GetApiMcpServerData,
+  GetApiMcpServerErrors,
+  GetApiMcpServerResponses,
   GetApiRunByIdEventData,
   GetApiRunByIdEventErrors,
   GetApiRunByIdEventResponse,
@@ -41,6 +50,9 @@ import type {
   GetApiSourceData,
   GetApiSourceErrors,
   GetApiSourceResponses,
+  GetApiToolPolicyByMcpServerIdData,
+  GetApiToolPolicyByMcpServerIdErrors,
+  GetApiToolPolicyByMcpServerIdResponses,
   GetApiUserByIdData,
   GetApiUserByIdErrors,
   GetApiUserByIdResponses,
@@ -50,6 +62,9 @@ import type {
   GetApiUserMeErrors,
   GetApiUserMeResponses,
   GetApiUserResponses,
+  PatchApiMcpServerByIdData,
+  PatchApiMcpServerByIdErrors,
+  PatchApiMcpServerByIdResponses,
   PatchApiUserMeData,
   PatchApiUserMeErrors,
   PatchApiUserMeResponses,
@@ -83,12 +98,18 @@ import type {
   PostApiEvalRunData,
   PostApiEvalRunErrors,
   PostApiEvalRunResponses,
+  PostApiMcpServerByIdAcceptanceData,
+  PostApiMcpServerByIdAcceptanceErrors,
+  PostApiMcpServerByIdAcceptanceResponses,
   PostApiSourceByIdIndexingData,
   PostApiSourceByIdIndexingErrors,
   PostApiSourceByIdIndexingResponses,
   PostApiSourceData,
   PostApiSourceErrors,
   PostApiSourceResponses,
+  PutApiToolPolicyByMcpServerIdByToolNameData,
+  PutApiToolPolicyByMcpServerIdByToolNameErrors,
+  PutApiToolPolicyByMcpServerIdByToolNameResponses,
 } from './types.gen'
 
 export type Options<
@@ -486,3 +507,123 @@ export const getApiEvalRunById = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetApiEvalRunByIdResponses, GetApiEvalRunByIdErrors, ThrowOnError>(
     { url: '/api/eval-run/{id}', ...options },
   )
+
+/**
+ * List MCP servers (admin)
+ */
+export const getApiMcpServer = <ThrowOnError extends boolean = false>(
+  options?: Options<GetApiMcpServerData, ThrowOnError>,
+): RequestResult<GetApiMcpServerResponses, GetApiMcpServerErrors, ThrowOnError> =>
+  (options?.client ?? client).get<GetApiMcpServerResponses, GetApiMcpServerErrors, ThrowOnError>({
+    url: '/api/mcp-server',
+    ...options,
+  })
+
+/**
+ * Get an MCP server (admin)
+ */
+export const getApiMcpServerById = <ThrowOnError extends boolean = false>(
+  options: Options<GetApiMcpServerByIdData, ThrowOnError>,
+): RequestResult<GetApiMcpServerByIdResponses, GetApiMcpServerByIdErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    GetApiMcpServerByIdResponses,
+    GetApiMcpServerByIdErrors,
+    ThrowOnError
+  >({ url: '/api/mcp-server/{id}', ...options })
+
+/**
+ * Enable or disable an MCP server (admin)
+ */
+export const patchApiMcpServerById = <ThrowOnError extends boolean = false>(
+  options: Options<PatchApiMcpServerByIdData, ThrowOnError>,
+): RequestResult<PatchApiMcpServerByIdResponses, PatchApiMcpServerByIdErrors, ThrowOnError> =>
+  (options.client ?? client).patch<
+    PatchApiMcpServerByIdResponses,
+    PatchApiMcpServerByIdErrors,
+    ThrowOnError
+  >({
+    url: '/api/mcp-server/{id}',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  })
+
+/**
+ * Read an MCP server's live listing (admin)
+ */
+export const getApiMcpServerByIdListing = <ThrowOnError extends boolean = false>(
+  options: Options<GetApiMcpServerByIdListingData, ThrowOnError>,
+): RequestResult<
+  GetApiMcpServerByIdListingResponses,
+  GetApiMcpServerByIdListingErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).get<
+    GetApiMcpServerByIdListingResponses,
+    GetApiMcpServerByIdListingErrors,
+    ThrowOnError
+  >({ url: '/api/mcp-server/{id}/listing', ...options })
+
+/**
+ * Accept an MCP server's listing (admin)
+ */
+export const postApiMcpServerByIdAcceptance = <ThrowOnError extends boolean = false>(
+  options: Options<PostApiMcpServerByIdAcceptanceData, ThrowOnError>,
+): RequestResult<
+  PostApiMcpServerByIdAcceptanceResponses,
+  PostApiMcpServerByIdAcceptanceErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    PostApiMcpServerByIdAcceptanceResponses,
+    PostApiMcpServerByIdAcceptanceErrors,
+    ThrowOnError
+  >({
+    url: '/api/mcp-server/{id}/acceptance',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  })
+
+/**
+ * Read an MCP server's tool policy (admin)
+ */
+export const getApiToolPolicyByMcpServerId = <ThrowOnError extends boolean = false>(
+  options: Options<GetApiToolPolicyByMcpServerIdData, ThrowOnError>,
+): RequestResult<
+  GetApiToolPolicyByMcpServerIdResponses,
+  GetApiToolPolicyByMcpServerIdErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).get<
+    GetApiToolPolicyByMcpServerIdResponses,
+    GetApiToolPolicyByMcpServerIdErrors,
+    ThrowOnError
+  >({ url: '/api/tool-policy/{mcpServerId}', ...options })
+
+/**
+ * Set a tool's policy (admin)
+ */
+export const putApiToolPolicyByMcpServerIdByToolName = <ThrowOnError extends boolean = false>(
+  options: Options<PutApiToolPolicyByMcpServerIdByToolNameData, ThrowOnError>,
+): RequestResult<
+  PutApiToolPolicyByMcpServerIdByToolNameResponses,
+  PutApiToolPolicyByMcpServerIdByToolNameErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).put<
+    PutApiToolPolicyByMcpServerIdByToolNameResponses,
+    PutApiToolPolicyByMcpServerIdByToolNameErrors,
+    ThrowOnError
+  >({
+    url: '/api/tool-policy/{mcpServerId}/{toolName}',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  })

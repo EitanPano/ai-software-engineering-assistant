@@ -53,6 +53,7 @@ from app.models.search.enums import ToolSearchCode
 from app.models.search.type import ToolSearchFailed
 from app.services.logger import log
 from app.services.security.crypto import constant_time_equals
+from app.services.utils.jsonb import jsonb_safe
 
 BEARER: Final = "Bearer "
 
@@ -196,13 +197,19 @@ def _listed(tool: types.Tool) -> ListedTool:
 
 
 async def list_tools(url: str, *, token: str | None) -> list[ListedTool]:
-    """The tools the server at `url` offers, or `McpUnavailable`."""
+    """The tools the server at `url` offers, or `McpUnavailable`. A listing the store cannot hold
+    (a NUL, a non-finite number: see `jsonb_safe`) is `McpUnavailable("unstorable_listing")`. It is
+    refused here, after the session returned, because inside `work` `_session` would rewrite the
+    reason; it is the one point a run, the review and the accept command all pass."""
 
     async def work(client: Client) -> list[ListedTool]:
         listing = await client.list_tools()
         return [_listed(tool) for tool in listing.tools]
 
-    return await _in_own_task(url, token, MCP.list_seconds, work)
+    tools = await _in_own_task(url, token, MCP.list_seconds, work)
+    if not all(jsonb_safe([t.name, t.description, t.input_schema]) for t in tools):
+        raise McpUnavailable("unstorable_listing")
+    return tools
 
 
 def _result_text(content: Sequence[types.ContentBlock]) -> str:

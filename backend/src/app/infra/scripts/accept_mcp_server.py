@@ -1,6 +1,6 @@
 """`python -m app.infra.scripts.accept_mcp_server <name>`: an admin accepts a third-party MCP
-server's tools. There is no screen for it yet, so this is the admin's act, as `grant_admin` made
-the first admin.
+server's tools, from a shell, as `grant_admin` makes the first admin. The `/mcp-server` screen is
+the other door: both call `accept_listing` and refuse a listing through `tool.listing_problem`.
 
 It lists the server live and prints the listing whole (every tool with its description and schema),
 its digest and what changed from the current pin, then asks for a yes. On a yes it stores exactly
@@ -20,7 +20,6 @@ backend-migrate python -m app.infra.scripts.accept_mcp_server github`. By hand:
 import asyncio
 import contextlib
 import json
-import re
 import sys
 from collections.abc import Callable, Sequence
 from typing import Final
@@ -33,7 +32,6 @@ from app.services import tool
 from app.services.logger import Logger, configure_logging, log
 
 USAGE: Final = "usage: accept_mcp_server <name>"
-TOOL_NAME: Final = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def read_answer() -> str:
@@ -55,15 +53,11 @@ async def accept(
     if live is None:
         logger.error("the server did not answer", {"server": name})
         return 1
-    if not live:
-        logger.error("the server lists no tool", {"server": name})
-        return 1
-
-    names = [entry.name for entry in live]
-    if len(set(names)) != len(names) or not all(TOOL_NAME.fullmatch(n) for n in names):
+    problem = tool.listing_problem(live)
+    if problem is not None:
         # Nothing of the listing is printed: a name is the server's, and may carry terminal escapes.
-        # The API also refuses a name outside this set, which would fail every new conversation.
-        logger.error("the listing has a tool name that is repeated or not [A-Za-z0-9_-]+")
+        # The screen's accept refuses by the same rule.
+        logger.error(problem, {"server": name})
         return 1
 
     write(f"{name}: {len(live)} tools, digest {tool.listing_digest(live)}")

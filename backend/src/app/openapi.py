@@ -73,6 +73,15 @@ COMPONENTS: Final = frozenset(
         "EvalCaseResult",
         "Approval",
         "DecideApprovalBody",
+        "McpServer",
+        "McpServerPage",
+        "ListingTool",
+        "McpServerListing",
+        "UpdateMcpServerBody",
+        "AcceptListingBody",
+        "ToolPolicy",
+        "ToolPolicySet",
+        "SetToolPolicyBody",
     }
 )
 

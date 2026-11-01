@@ -11,12 +11,17 @@ import {
   getApiEvalRunById,
   getApiHealth,
   getApiHealthReady,
+  getApiMcpServer,
+  getApiMcpServerById,
+  getApiMcpServerByIdListing,
   getApiSearch,
   getApiSource,
+  getApiToolPolicyByMcpServerId,
   getApiUser,
   getApiUserById,
   getApiUserMe,
   type Options,
+  patchApiMcpServerById,
   patchApiUserMe,
   postApiApprovalByIdDecision,
   postApiAuthLogin,
@@ -28,8 +33,10 @@ import {
   postApiConversation,
   postApiConversationByIdMessage,
   postApiEvalRun,
+  postApiMcpServerByIdAcceptance,
   postApiSource,
   postApiSourceByIdIndexing,
+  putApiToolPolicyByMcpServerIdByToolName,
 } from '../sdk.gen'
 import type {
   GetApiConversationByIdData,
@@ -53,12 +60,24 @@ import type {
   GetApiHealthReadyError,
   GetApiHealthReadyResponse,
   GetApiHealthResponse,
+  GetApiMcpServerByIdData,
+  GetApiMcpServerByIdError,
+  GetApiMcpServerByIdListingData,
+  GetApiMcpServerByIdListingError,
+  GetApiMcpServerByIdListingResponse,
+  GetApiMcpServerByIdResponse,
+  GetApiMcpServerData,
+  GetApiMcpServerError,
+  GetApiMcpServerResponse,
   GetApiSearchData,
   GetApiSearchError,
   GetApiSearchResponse,
   GetApiSourceData,
   GetApiSourceError,
   GetApiSourceResponse,
+  GetApiToolPolicyByMcpServerIdData,
+  GetApiToolPolicyByMcpServerIdError,
+  GetApiToolPolicyByMcpServerIdResponse,
   GetApiUserByIdData,
   GetApiUserByIdError,
   GetApiUserByIdResponse,
@@ -68,6 +87,9 @@ import type {
   GetApiUserMeError,
   GetApiUserMeResponse,
   GetApiUserResponse,
+  PatchApiMcpServerByIdData,
+  PatchApiMcpServerByIdError,
+  PatchApiMcpServerByIdResponse,
   PatchApiUserMeData,
   PatchApiUserMeError,
   PatchApiUserMeResponse,
@@ -101,12 +123,18 @@ import type {
   PostApiEvalRunData,
   PostApiEvalRunError,
   PostApiEvalRunResponse,
+  PostApiMcpServerByIdAcceptanceData,
+  PostApiMcpServerByIdAcceptanceError,
+  PostApiMcpServerByIdAcceptanceResponse,
   PostApiSourceByIdIndexingData,
   PostApiSourceByIdIndexingError,
   PostApiSourceByIdIndexingResponse,
   PostApiSourceData,
   PostApiSourceError,
   PostApiSourceResponse,
+  PutApiToolPolicyByMcpServerIdByToolNameData,
+  PutApiToolPolicyByMcpServerIdByToolNameError,
+  PutApiToolPolicyByMcpServerIdByToolNameResponse,
 } from '../types.gen'
 
 export type QueryKey<TOptions extends Options> = [
@@ -785,3 +813,190 @@ export const getApiEvalRunByIdOptions = (options: Options<GetApiEvalRunByIdData>
     },
     queryKey: getApiEvalRunByIdQueryKey(options),
   })
+
+export const getApiMcpServerQueryKey = (options?: Options<GetApiMcpServerData>) =>
+  createQueryKey('getApiMcpServer', options)
+
+/**
+ * List MCP servers (admin)
+ */
+export const getApiMcpServerOptions = (options?: Options<GetApiMcpServerData>) =>
+  queryOptions<
+    GetApiMcpServerResponse,
+    GetApiMcpServerError,
+    GetApiMcpServerResponse,
+    ReturnType<typeof getApiMcpServerQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiMcpServer({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiMcpServerQueryKey(options),
+  })
+
+export const getApiMcpServerByIdQueryKey = (options: Options<GetApiMcpServerByIdData>) =>
+  createQueryKey('getApiMcpServerById', options)
+
+/**
+ * Get an MCP server (admin)
+ */
+export const getApiMcpServerByIdOptions = (options: Options<GetApiMcpServerByIdData>) =>
+  queryOptions<
+    GetApiMcpServerByIdResponse,
+    GetApiMcpServerByIdError,
+    GetApiMcpServerByIdResponse,
+    ReturnType<typeof getApiMcpServerByIdQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiMcpServerById({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiMcpServerByIdQueryKey(options),
+  })
+
+/**
+ * Enable or disable an MCP server (admin)
+ */
+export const patchApiMcpServerByIdMutation = (
+  options?: Partial<Options<PatchApiMcpServerByIdData>>,
+): UseMutationOptions<
+  PatchApiMcpServerByIdResponse,
+  PatchApiMcpServerByIdError,
+  Options<PatchApiMcpServerByIdData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PatchApiMcpServerByIdResponse,
+    PatchApiMcpServerByIdError,
+    Options<PatchApiMcpServerByIdData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await patchApiMcpServerById({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getApiMcpServerByIdListingQueryKey = (
+  options: Options<GetApiMcpServerByIdListingData>,
+) => createQueryKey('getApiMcpServerByIdListing', options)
+
+/**
+ * Read an MCP server's live listing (admin)
+ */
+export const getApiMcpServerByIdListingOptions = (
+  options: Options<GetApiMcpServerByIdListingData>,
+) =>
+  queryOptions<
+    GetApiMcpServerByIdListingResponse,
+    GetApiMcpServerByIdListingError,
+    GetApiMcpServerByIdListingResponse,
+    ReturnType<typeof getApiMcpServerByIdListingQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiMcpServerByIdListing({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiMcpServerByIdListingQueryKey(options),
+  })
+
+/**
+ * Accept an MCP server's listing (admin)
+ */
+export const postApiMcpServerByIdAcceptanceMutation = (
+  options?: Partial<Options<PostApiMcpServerByIdAcceptanceData>>,
+): UseMutationOptions<
+  PostApiMcpServerByIdAcceptanceResponse,
+  PostApiMcpServerByIdAcceptanceError,
+  Options<PostApiMcpServerByIdAcceptanceData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiMcpServerByIdAcceptanceResponse,
+    PostApiMcpServerByIdAcceptanceError,
+    Options<PostApiMcpServerByIdAcceptanceData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postApiMcpServerByIdAcceptance({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getApiToolPolicyByMcpServerIdQueryKey = (
+  options: Options<GetApiToolPolicyByMcpServerIdData>,
+) => createQueryKey('getApiToolPolicyByMcpServerId', options)
+
+/**
+ * Read an MCP server's tool policy (admin)
+ */
+export const getApiToolPolicyByMcpServerIdOptions = (
+  options: Options<GetApiToolPolicyByMcpServerIdData>,
+) =>
+  queryOptions<
+    GetApiToolPolicyByMcpServerIdResponse,
+    GetApiToolPolicyByMcpServerIdError,
+    GetApiToolPolicyByMcpServerIdResponse,
+    ReturnType<typeof getApiToolPolicyByMcpServerIdQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiToolPolicyByMcpServerId({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiToolPolicyByMcpServerIdQueryKey(options),
+  })
+
+/**
+ * Set a tool's policy (admin)
+ */
+export const putApiToolPolicyByMcpServerIdByToolNameMutation = (
+  options?: Partial<Options<PutApiToolPolicyByMcpServerIdByToolNameData>>,
+): UseMutationOptions<
+  PutApiToolPolicyByMcpServerIdByToolNameResponse,
+  PutApiToolPolicyByMcpServerIdByToolNameError,
+  Options<PutApiToolPolicyByMcpServerIdByToolNameData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PutApiToolPolicyByMcpServerIdByToolNameResponse,
+    PutApiToolPolicyByMcpServerIdByToolNameError,
+    Options<PutApiToolPolicyByMcpServerIdByToolNameData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await putApiToolPolicyByMcpServerIdByToolName({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}

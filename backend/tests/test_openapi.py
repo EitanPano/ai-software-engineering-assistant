@@ -155,6 +155,12 @@ class TestTheDocument:
             "/api/search": {"get"},
             "/api/eval-run": {"get", "post"},
             "/api/eval-run/{id}": {"get"},
+            "/api/mcp-server": {"get"},
+            "/api/mcp-server/{id}": {"get", "patch"},
+            "/api/mcp-server/{id}/listing": {"get"},
+            "/api/mcp-server/{id}/acceptance": {"post"},
+            "/api/tool-policy/{mcpServerId}": {"get"},
+            "/api/tool-policy/{mcpServerId}/{toolName}": {"put"},
         }
 
     def test_documents_the_user_list_query_and_its_page_component(self) -> None:
@@ -304,6 +310,15 @@ class TestTheShaping:
                 "EvalCaseResult",
                 "Approval",
                 "DecideApprovalBody",
+                "McpServer",
+                "McpServerPage",
+                "ListingTool",
+                "McpServerListing",
+                "UpdateMcpServerBody",
+                "AcceptListingBody",
+                "ToolPolicy",
+                "ToolPolicySet",
+                "SetToolPolicyBody",
             }
         )
 

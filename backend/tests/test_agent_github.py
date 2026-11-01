@@ -20,6 +20,7 @@ from tests.approval_support import LabBacked, approvals_of, settle, status_of
 from tests.fake_github_mcp import FILE_TEXT, recorded_tools
 from tests.fake_mcp import GITHUB_HOST, KNOWLEDGE_HOST, Servers
 from tests.fake_mcp import mcp_servers as mcp_servers
+from tests.rewrite_app import Rewrite
 from tests.store import store_backed
 from tests.support import recording_logger
 from tests.test_agent import Journey, finish_of, text_of
@@ -199,6 +200,43 @@ class TestDownServer(LabBacked):
         (stored,) = await calls_of(run_id)
         assert (stored.mcp_server_id, stored.status) == ("github", "succeeded")
         assert finish_of(frames).event["status"] == "completed"
+
+    @pytest.mark.parametrize(
+        ("title", "swap"),
+        [("a\x00b", b""), ("@@", b"NaN"), ("@@", b"Infinity"), ("@@", b"1e400")],
+        ids=["nul", "nan", "infinity", "overflow"],
+    )
+    async def test_an_unstorable_listing_is_one_notice_the_pin_is_offered_and_the_run_finishes(
+        self,
+        client: httpx.AsyncClient,
+        fake_model: RecordingFake,
+        servers: Servers,
+        monkeypatch: pytest.MonkeyPatch,
+        title: str,
+        swap: bytes,
+    ) -> None:
+        logger, sink = recording_logger()
+        monkeypatch.setattr("app.api.mcp_server.controller.log", logger)
+        await servers.accept_github()
+        hostile = ListedTool(
+            name="odd", description="d", input_schema={"type": "object", "default": title}
+        )
+        servers.github.tools[:] = [hostile]
+        if swap:
+            servers.hosts.apps[GITHUB_HOST] = Rewrite(  # type: ignore[assignment]
+                servers.hosts.apps[GITHUB_HOST], {b'"@@"': swap}
+            )
+
+        _, frames = await Journey(client).run("hello")
+
+        notices = events_named(frames, "mcp_server_unavailable")
+        assert [f.event["name"] for f in notices] == ["github"]
+        expected = tool.definitions(
+            {"knowledge": await _knowledge_listing(), "github": recorded_tools()}
+        )
+        assert fake_model.requests[0]["tools"] == json.loads(json.dumps(expected))
+        assert finish_of(frames).event["status"] == "completed"
+        assert [line for line in sink.lines if "unstorable_listing" in line]
 
 
 async def _knowledge_listing() -> list[ListedTool]:
