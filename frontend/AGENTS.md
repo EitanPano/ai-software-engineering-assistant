@@ -376,6 +376,12 @@ tests.seed_ask_tool`, then `app.main`: `e2e-db`'s restore deletes the last run's
   seventh web server starts, so `LINES_PER_SERVER` stays. `approval.spec.ts` sends
   `MARKER.tool('fixture__note')`, reads the arguments, reloads, then approves or rejects, and
   registers nothing under `E2E_BASE_URL`.
+- **The GitHub tool.** The API gets `GITHUB_MCP_URL` at the Anthropic fake's `/github/mcp` (the
+  backend's fake GitHub MCP server, in that process) and a placeholder `GITHUB_MCP_TOKEN`, never a
+  PAT; still six web servers. `github.spec.ts` sends `MARKER.githubComment`, whose body runs past a
+  screen, and asserts the waiting row's arguments neither scroll nor sit below Approve, the page has
+  no horizontal overflow, then approves and reads the outcome. The waiting row's arguments have no
+  height cap by design (`tool-call-row.tsx`); the output box keeps its scroll.
 - **The staff group.** `/source` and `/source/connect` sit in a pathless admin group in
   `routes.tsx`, each loader calling `requireRole(queryClient, 'admin')`. Their e2e accounts are
   promoted by `grantAdmin` (`tests/e2e/source-support.ts`), which runs the server's `grant_admin`

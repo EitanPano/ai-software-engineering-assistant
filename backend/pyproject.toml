@@ -56,6 +56,10 @@ required-version = ">=0.12.23,<0.14"
 dev = "python -m app.main --reload"
 # The `knowledge` MCP server by hand, on the port KNOWLEDGE_MCP_URL names (the API keeps 8000).
 knowledge = { cmd = "python -m app.knowledge_main", env = { PORT = "8001" } }
+# The GitHub gateway by hand, on the port GITHUB_MCP_URL names. It holds the personal access token,
+# so it is started from `backend/.env.github` and from nowhere else:
+# `uv run --env-file .env.github poe github-gateway`.
+github-gateway = { cmd = "python -m app.github_gateway_main", env = { PORT = "8002", APP_PROCESS = "github_gateway" } }
 format = [{ cmd = "ruff check --select I --fix" }, { cmd = "ruff format" }]
 format-check = "ruff format --check"
 typecheck = "mypy src tests"
@@ -133,7 +137,7 @@ include_external_packages = true
 name = "layers: entry, server, routes, modules, middleware, services, config"
 type = "layers"
 layers = [
-  "app.main | app.knowledge_main",
+  "app.main | app.knowledge_main | app.github_gateway_main",
   "app.server",
   "app.config.routes",
   "app.api",
@@ -172,6 +176,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
 ]
 allow_indirect_imports = true
@@ -190,6 +195,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.cors",
   "app.config.routes",
@@ -223,6 +229,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.constants",
   "app.config.routes",
@@ -242,6 +249,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.cors",
   "app.config.routes",
@@ -260,6 +268,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.env",
   "app.config.constants",
@@ -283,6 +292,7 @@ source_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.env",
   "app.config.constants",
@@ -301,6 +311,7 @@ source_modules = [
   "app.services",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.env",
   "app.config.constants",
@@ -329,6 +340,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
 ]
 allow_indirect_imports = true
@@ -368,6 +380,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.routes",
 ]
@@ -398,6 +411,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.config.routes",
 ]
@@ -423,6 +437,7 @@ source_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
 ]
 forbidden_modules = ["app.services.db"]
@@ -439,6 +454,7 @@ source_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
 ]
 forbidden_modules = ["app.services.cache"]
@@ -463,6 +479,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
 ]
 allow_indirect_imports = true
@@ -478,6 +495,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
 ]
 allow_indirect_imports = true
@@ -555,6 +573,7 @@ forbidden_modules = [
   "app.server",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
   "app.openapi",
   "app.services.anthropic",
   "app.services.cache",
@@ -727,6 +746,7 @@ forbidden_modules = [
   "app.services.utils",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
 ]
 allow_indirect_imports = true
 
@@ -742,6 +762,7 @@ forbidden_modules = [
   "app.middleware",
   "app.main",
   "app.knowledge_main",
+  "app.github_gateway_main",
 ]
 allow_indirect_imports = true
 
@@ -772,7 +793,7 @@ source_modules = [
   "app.server",
   "app.openapi",
 ]
-forbidden_modules = ["app.main", "app.knowledge_main"]
+forbidden_modules = ["app.main", "app.knowledge_main", "app.github_gateway_main"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -802,6 +823,27 @@ forbidden_modules = [
   "app.api.*.routes",
   "app.api.*.service",
   "app.api.*.schema",
+]
+allow_indirect_imports = true
+
+# The GitHub gateway holds a write credential and nothing else: no store, no module, no `infra/`
+# at all, and no other entry. It imports its environment, the logger and `services/mcp.py`.
+[[tool.importlinter.contracts]]
+name = "the github gateway entry stays an entry"
+type = "forbidden"
+source_modules = ["app.github_gateway_main"]
+forbidden_modules = [
+  "app.main",
+  "app.knowledge_main",
+  "app.server",
+  "app.openapi",
+  "app.middleware",
+  "app.config.routes",
+  "app.config.constants",
+  "app.infra",
+  "app.api",
+  "app.services.db",
+  "app.services.cache",
 ]
 allow_indirect_imports = true
 

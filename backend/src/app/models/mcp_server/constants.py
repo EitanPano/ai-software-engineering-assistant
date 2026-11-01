@@ -10,6 +10,9 @@ from typing import Final
 from app.models.mcp_server.type import ListedTool
 
 KNOWLEDGE_SERVER: Final = "knowledge"
+# GitHub's official MCP server, behind our gateway. Its address and token are environment variables
+# like `knowledge`'s; unlike `knowledge` it is third party, so its tools are pinned.
+GITHUB_SERVER: Final = "github"
 
 # The description is part of the model's prompt and of the cache prefix; change it with care.
 SEARCH_TOOL: Final = ListedTool(

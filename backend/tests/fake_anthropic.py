@@ -24,6 +24,13 @@ apart. A marker is `[[name]]` or `[[name:key]]`:
 - `[[empty]]`: `end_turn` with no content at all.
 - `[[parallel]]`: the first call asks for two tools (`lab__first` and `lab__second`) in one turn.
 - `[[trio]]`: the first call asks for `lab__echo`, `lab__lookup` and `lab__loose`, in that order.
+- `[[github_comment]]`: asks for `github__add_issue_comment` with a valid input whose `body` is 60
+  lines (`GITHUB_COMMENT_BODY`), long enough to run past a screen; after the result the answer is
+  "Tool done.". `[[tool:github__issue_read]]` and `[[tool:github__get_file_contents]]` ask for those
+  with valid inputs (`GITHUB_ARGUMENTS`).
+- `[[github_minimum]]`: asks for `github__add_issue_comment` with a `comment_id` of 0, which the
+  recorded schema's `minimum: 1` refuses.
+- `[[pair]]`: one turn asks for `knowledge__search` and `github__issue_read` together.
 - `[[twice:NAME]]`: asks for NAME with `{"text": "hi"}`, then, after its result, again with
   `{"text": "hi2"}`, then answers.
 - `[[think]]`: a `thinking` block opens a tool call or an answer. Its signature is a SHA-256 over
@@ -57,6 +64,7 @@ import os
 import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import AsyncExitStack
 from typing import Final
 
 from starlette.applications import Starlette
@@ -77,6 +85,29 @@ SEARCH_TOOL: Final = "knowledge__search"
 RESEARCH_QUERIES: Final = (SEMANTIC_QUERY, KEYWORD_QUERY)
 MANY_CALLS: Final = 14
 TWICE_TEXTS: Final = ("hi", "hi2")
+# `[[github_comment]]` asks to comment on an issue. The body runs past a screen on a phone, so the
+# e2e journey proves the whole of it sits above the decision buttons, with no inner scroll.
+GITHUB_COMMENT_LINES: Final = 60
+GITHUB_COMMENT_BODY: Final = "\n".join(
+    f"Scripted comment, line {number} of {GITHUB_COMMENT_LINES}."
+    for number in range(1, GITHUB_COMMENT_LINES + 1)
+)
+GITHUB_COMMENT_TOOL: Final = "github__add_issue_comment"
+GITHUB_ARGUMENTS: Final[dict[str, dict[str, object]]] = {
+    GITHUB_COMMENT_TOOL: {
+        "owner": "octo-org",
+        "repo": "hello-world",
+        "issue_number": 7,
+        "body": GITHUB_COMMENT_BODY,
+    },
+    "github__issue_read": {
+        "method": "get",
+        "owner": "octo-org",
+        "repo": "hello-world",
+        "issue_number": 7,
+    },
+    "github__get_file_contents": {"owner": "octo-org", "repo": "hello-world", "path": "README.md"},
+}
 NO_ANSWER: Final = "The knowledge base holds no answer to that."
 NOT_OFFERED: Final = "I cannot search the knowledge base right now."
 HOLD_TIMEOUT_SECONDS: Final = 30.0
@@ -301,7 +332,19 @@ def tool_names_of(tools: object) -> set[str]:
 
 
 _FIRST_TURN_TOOLS = frozenset(
-    {"tool", "badtool", "stringinput", "nulinput", "many", "parallel", "trio", "fallback_tool"}
+    {
+        "tool",
+        "badtool",
+        "stringinput",
+        "nulinput",
+        "many",
+        "parallel",
+        "trio",
+        "fallback_tool",
+        "github_comment",
+        "github_minimum",
+        "pair",
+    }
 )
 
 
@@ -417,8 +460,13 @@ async def _hold(key: str) -> None:
 
 
 def _arguments_for(name: str) -> Json:
-    """A valid input for the tool: `knowledge__search` takes a query, the scripted tools a text."""
-    return {"query": SEMANTIC_QUERY} if name == SEARCH_TOOL else {"text": "hi"}
+    """A valid input for the tool: `knowledge__search` takes a query, a GitHub tool what its
+    recorded schema requires, the scripted tools a text."""
+    if name == SEARCH_TOOL:
+        return {"query": SEMANTIC_QUERY}
+    if name in GITHUB_ARGUMENTS:
+        return dict(GITHUB_ARGUMENTS[name])
+    return {"text": "hi"}
 
 
 def _cited(result: str) -> str:
@@ -589,6 +637,21 @@ async def script(
                 yield part
             base += 2
             calls = [(name, _arguments_for(name))]
+        elif "github_comment" in marks:
+            calls = [(GITHUB_COMMENT_TOOL, _arguments_for(GITHUB_COMMENT_TOOL))]
+        elif "github_minimum" in marks:
+            # `comment_id` has `minimum: 1`, a keyword the API no longer checks without `strict`.
+            calls = [
+                (
+                    GITHUB_COMMENT_TOOL,
+                    {**_arguments_for("github__issue_read"), "comment_id": 0, "reaction": "eyes"},
+                )
+            ]
+        elif "pair" in marks:
+            calls = [
+                (SEARCH_TOOL, _arguments_for(SEARCH_TOOL)),
+                ("github__issue_read", _arguments_for("github__issue_read")),
+            ]
         elif "parallel" in marks:
             calls = [("lab__first", {"text": "a"}), ("lab__second", {"text": "b"})]
         elif "stringinput" in marks:
@@ -687,14 +750,25 @@ app: Final = Starlette(
 )
 
 
-def with_note_server(note: Callable[[Scope, Receive, Send], Awaitable[None]]) -> ASGIApp:
-    """The fake plus the `fixture` MCP server at `/mcp` (`tests/fake_note.py`), in one process: the
-    lifespan enters the server's, `/mcp` and `/health` of the server go to it, the rest to the
-    fake. `note` is a `McpApp`, whose own `lifespan()` the fake needs while it serves."""
+GITHUB_PATH: Final = "/github/mcp"
+
+
+def with_note_server(
+    note: Callable[[Scope, Receive, Send], Awaitable[None]],
+    github: Callable[[Scope, Receive, Send], Awaitable[None]] | None = None,
+) -> ASGIApp:
+    """The fake plus the `fixture` MCP server at `/mcp` (`tests/fake_note.py`) and, when given, the
+    scripted `github-mcp-server` at `/github/mcp` (`tests/fake_github_mcp.py`), in one process: the
+    lifespan enters each server's, their paths go to them, the rest to the fake. `note` and `github`
+    are `McpApp`s, whose own `lifespan()` the fake needs while it serves; the GitHub one serves
+    `/mcp` itself, so its path is rewritten."""
+    servers = [note] if github is None else [note, github]
 
     async def serve(scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
-            async with note.lifespan():  # type: ignore[attr-defined]
+            async with AsyncExitStack() as stack:
+                for server in servers:
+                    await stack.enter_async_context(server.lifespan())  # type: ignore[attr-defined]
                 while True:
                     message = await receive()
                     if message["type"] == "lifespan.startup":
@@ -704,6 +778,8 @@ def with_note_server(note: Callable[[Scope, Receive, Send], Awaitable[None]]) ->
                         return
         elif scope["type"] == "http" and scope["path"] == "/mcp":
             await note(scope, receive, send)
+        elif github is not None and scope["type"] == "http" and scope["path"] == GITHUB_PATH:
+            await github({**scope, "path": "/mcp"}, receive, send)
         else:
             await app(scope, receive, send)
 
@@ -713,10 +789,17 @@ def with_note_server(note: Callable[[Scope, Receive, Send], Awaitable[None]]) ->
 def main(environ: Mapping[str, str] = os.environ) -> None:
     import uvicorn  # only the e2e entry starts a server
 
+    from tests.fake_github_mcp import E2E_TOKEN, Github, create_github_app
     from tests.fake_note import create_note_app  # loads the app's MCP seam, so not at import
 
     port = int(environ.get("FAKE_ANTHROPIC_PORT", "8101"))
-    uvicorn.run(with_note_server(create_note_app(port)), host="127.0.0.1", port=port)
+    hosts = [f"127.0.0.1:{port}", f"localhost:{port}"]
+    # The bearer the API sends is `GITHUB_MCP_TOKEN` of its web server; the placeholder is the
+    # default of both sides, so a config that sets nothing still agrees.
+    github = create_github_app(
+        Github(), token=environ.get("GITHUB_MCP_TOKEN") or E2E_TOKEN, allowed_hosts=hosts
+    )
+    uvicorn.run(with_note_server(create_note_app(port), github), host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

@@ -61,6 +61,15 @@ _SECRET_NAMES: Final = (
 # verifies anywhere.
 _KNOWLEDGE_SECRET_NAMES: Final = ("DATABASE_URL", "VOYAGE_API_KEY", "KNOWLEDGE_MCP_TOKEN")
 
+# The GitHub gateway (`APP_PROCESS=github_gateway`) holds a write credential, so it needs these two
+# in every environment, with no development default, and no secret of the API. Any other process
+# that is handed the personal access token refuses to boot: `load_env` leaves `os.environ`
+# untouched, so a token in the API's environment would stay there, and dropping it silently would
+# hide that.
+_GATEWAY_SECRET_NAMES: Final = ("GITHUB_MCP_PAT", "GITHUB_MCP_TOKEN")
+# What GitHub's tokens start with: classic, fine-grained, OAuth, user-to-server, server-to-server.
+_PAT_PREFIXES: Final = ("ghp_", "github_pat_", "gho_", "ghu_", "ghs_")
+
 _DEVELOPMENT_DEFAULTS: Final = {
     # Not a real key and not shaped like one: development and every test run on the scripted fake.
     "ANTHROPIC_API_KEY": "dev-only-anthropic-key-not-real",
@@ -87,6 +96,10 @@ _BLANK_IS_UNSET: Final = (
     "GITHUB_BASE_URL",
     "APP_PROCESS",
     "KNOWLEDGE_MCP_URL",
+    "GITHUB_MCP_URL",
+    "GITHUB_MCP_TOKEN",
+    "GITHUB_MCP_PAT",
+    "GITHUB_MCP_UPSTREAM_URL",
 )
 
 _MIN_SECRET_LENGTH: Final = 32
@@ -182,9 +195,10 @@ class Env(BaseModel):
     )
 
     app_env: Literal["development", "test", "production"] = "development"
-    # Which process this is: the API (and its migrate and grant-admin commands) or the `knowledge`
-    # MCP server. Required in production, so a service started without it fails at boot.
-    app_process: Literal["backend", "knowledge"] = "backend"
+    # Which process this is: the API (and its migrate and grant-admin commands), the `knowledge`
+    # MCP server or the GitHub gateway. Required in production, so a service started without it
+    # fails at boot.
+    app_process: Literal["backend", "knowledge", "github_gateway"] = "backend"
     port: Annotated[int, Field(gt=0, le=65535)] = 8000
     trust_proxy: Annotated[
         TrustProxy, BeforeValidator(_parse_trust_proxy), AfterValidator(_check_trust_proxy)
@@ -221,6 +235,14 @@ class Env(BaseModel):
     # token is a secret: the server compares it in constant time.
     knowledge_mcp_url: Annotated[str, Field(min_length=1)] = "http://127.0.0.1:8001/mcp"
     knowledge_mcp_token: Secret
+    # Where the API reaches the GitHub gateway, and the bearer token both sides share. Optional:
+    # an install with no GitHub token leaves it unset and the `github` server is never accepted.
+    github_mcp_url: Annotated[str, Field(min_length=1)] = "http://127.0.0.1:8002/mcp"
+    github_mcp_token: Secret | None = None
+    # Only the gateway process holds these: the personal access token, and the address of
+    # `github-mcp-server` it forwards to (which sees the token per request and stores it nowhere).
+    github_mcp_pat: Secret | None = None
+    github_mcp_upstream_url: Annotated[str, Field(min_length=1)] = "http://127.0.0.1:8082/"
 
 
 @dataclass(frozen=True)
@@ -240,6 +262,17 @@ def _random_secrets() -> dict[str, str]:
     }
 
 
+def _gateway_unused() -> dict[str, str]:
+    """A value for every secret the GitHub gateway does not use, new at each boot: it holds no model
+    key, no store and no signing secret, whatever its shell exported."""
+    return _random_secrets() | {
+        "VOYAGE_API_KEY": secrets.token_urlsafe(48),
+        "KNOWLEDGE_MCP_TOKEN": secrets.token_urlsafe(48),
+        # Never connected: the gateway has no store.
+        "DATABASE_URL": "postgres://unused:unused@127.0.0.1:1/unused",
+    }
+
+
 def _placeholder_problems(source: Mapping[str, str], names: tuple[str, ...]) -> list[str]:
     """A copied example file or the development default must not reach production: the secrets
     would be public. Only the name is reported, never the value."""
@@ -248,7 +281,10 @@ def _placeholder_problems(source: Mapping[str, str], names: tuple[str, ...]) -> 
         value = source.get(name, "")
         if value == "":
             continue
-        if value.startswith(("change-me", "dev-only-")) or value == _DEVELOPMENT_DEFAULTS[name]:
+        # "<" opens the README's `<a random string ...>` placeholder.
+        if value.startswith(("change-me", "dev-only-", "<")) or value == _DEVELOPMENT_DEFAULTS.get(
+            name
+        ):
             problems.append(f"{name}: is a placeholder, set a real secret")
     access = source.get("JWT_ACCESS_SECRET", "")
     if "JWT_ACCESS_SECRET" in names and access != "" and access == source.get("JWT_REFRESH_SECRET"):
@@ -273,8 +309,16 @@ def load_env(source: Mapping[str, str]) -> LoadedEnv:
         for name, value in source.items()
         if not (name in _BLANK_IS_UNSET and value.strip() == "")
     }
-    knowledge = production and values.get("APP_PROCESS") == "knowledge"
-    if not production:
+    process = values.get("APP_PROCESS", "backend")
+    gateway = process == "github_gateway"
+    if "GITHUB_MCP_PAT" in values and not gateway:
+        # Named, never its value. It would stay in this process's environment, which is the API's.
+        raise EnvError(
+            "invalid environment: GITHUB_MCP_PAT: is only for the GitHub gateway "
+            "(APP_PROCESS=github_gateway); keep it out of this process's environment"
+        )
+    knowledge = production and process == "knowledge"
+    if not production and not gateway:
         for name in _SECRET_NAMES:
             if source.get(name, "") == "":
                 values[name] = _DEVELOPMENT_DEFAULTS[name]
@@ -282,11 +326,29 @@ def load_env(source: Mapping[str, str]) -> LoadedEnv:
     if knowledge:
         # Never the model key this process was handed by mistake: it holds none.
         values |= _random_secrets()
-
-    if production:
-        problems = _placeholder_problems(
-            source, _KNOWLEDGE_SECRET_NAMES if knowledge else _SECRET_NAMES
+    if gateway:
+        absent = [f"{name}: Field required" for name in _GATEWAY_SECRET_NAMES if name not in values]
+        if absent:
+            raise EnvError(f"invalid environment: {'; '.join(absent)}")
+        # A write credential sits here, so a copied example value is refused in every environment,
+        # and the personal access token is never also the shared bearer token.
+        problems = _placeholder_problems(source, _GATEWAY_SECRET_NAMES)
+        if values["GITHUB_MCP_PAT"] == values["GITHUB_MCP_TOKEN"]:
+            problems.append("GITHUB_MCP_TOKEN: must differ from GITHUB_MCP_PAT")
+        if problems:
+            raise EnvError(f"invalid environment: {'; '.join(problems)}")
+        values |= _gateway_unused()
+    if values.get("GITHUB_MCP_TOKEN", "").startswith(_PAT_PREFIXES):
+        # The bearer token is shared with the API and so sits in its environment; a personal access
+        # token there would be past the boundary. Only the name is reported.
+        raise EnvError(
+            "invalid environment: GITHUB_MCP_TOKEN: looks like a GitHub token; "
+            "generate a random string instead"
         )
+
+    if production and not gateway:  # the gateway's names were checked above
+        names = _KNOWLEDGE_SECRET_NAMES if knowledge else (*_SECRET_NAMES, "GITHUB_MCP_TOKEN")
+        problems = _placeholder_problems(source, names)
         if problems:
             raise EnvError(f"invalid environment: {'; '.join(problems)}")
     missing_process = ["APP_PROCESS: is required in production"] if production else []

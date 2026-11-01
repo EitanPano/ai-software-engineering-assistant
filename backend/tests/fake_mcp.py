@@ -1,21 +1,26 @@
 """MCP servers for the agent suites, reached in process through `services/mcp.py`'s transport seam.
 
-`mcp_servers` serves two servers behind one host router: the real `knowledge` server
-(`app.knowledge_main.create_app`, on the host `KNOWLEDGE_MCP_URL` defaults to) and `lab`, a
-server of scripted tools built with the same `build_app`. A host that is not served answers 503,
-which the client reports as unavailable, so `take_down` makes a server "down" without a socket.
+`mcp_servers` serves three servers behind one host router: the real `knowledge` server
+(`app.knowledge_main.create_app`, on the host `KNOWLEDGE_MCP_URL` defaults to), `lab`, a server of
+scripted tools built with the same `build_app`, and the scripted `github-mcp-server`
+(`tests/fake_github_mcp.py`) on the host `GITHUB_MCP_URL` defaults to, enforcing the bearer
+`GITHUB_MCP_TOKEN` (the tests' environment sets it). A host that is not served answers 503, which
+the client reports as unavailable, so `take_down` makes a server "down" without a socket.
 `register_lab` writes the `mcp_server` and `tool_policy` rows that make the loop offer and allow
-`lab`'s tools; `reset_store` restores the seeded rows afterwards.
+`lab`'s tools, and the pin: `lab` is a third party, so it offers nothing until its tools are
+pinned. `accept_github` pins the seeded `github` row, as `accept_mcp_server` does.
+`reset_store` restores the seeded rows afterwards.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Final
 
 import httpx2
 import pytest
+from psycopg.types.json import Jsonb
 from starlette.types import Receive, Scope, Send
 
 from app.config.env import env
@@ -25,10 +30,22 @@ from app.models.tool_policy.enums import PolicyEffect
 from app.services import mcp
 from app.services.db import execute
 from app.services.mcp import McpApp, ToolFailure, build_app
+from tests.fake_github_mcp import Github, create_github_app
 
 LAB_URL: Final = "http://lab:9000/mcp"
 LAB_HOST: Final = "lab:9000"
 KNOWLEDGE_HOST: Final = httpx2.URL(env.knowledge_mcp_url).netloc.decode()
+GITHUB_HOST: Final = httpx2.URL(env.github_mcp_url).netloc.decode()
+
+
+def pin_document(tools: Sequence[ListedTool]) -> Jsonb:
+    """A listing as the `mcp_server` columns store it."""
+    return Jsonb(
+        [
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+            for t in tools
+        ]
+    )
 
 
 def _schema(*, required: bool) -> dict[str, object]:
@@ -103,6 +120,19 @@ class Hosts:
 class Servers:
     hosts: Hosts
     lab: Lab
+    github: Github
+
+    async def accept_github(
+        self, tools: Sequence[ListedTool] | None = None, *, enabled: bool = True
+    ) -> None:
+        """What `accept_mcp_server github` does: pins `tools` (the scripted server's own, by
+        default), keeps them as the last listing and enables the seeded row."""
+        accepted = list(self.github.tools if tools is None else tools)
+        await execute(
+            "update mcp_server set pinned_tool_definition = %s, tool_definition = %s, "
+            "enabled = %s where name = 'github'",
+            (pin_document(accepted), pin_document(accepted), enabled),
+        )
 
     def take_down(self, host: str) -> None:
         self.hosts.down.add(host)
@@ -120,13 +150,15 @@ class Servers:
         *,
         enabled: bool = True,
         default: PolicyEffect | None = PolicyEffect.allow,
+        pinned: bool = True,
     ) -> None:
         """`lab` as an `mcp_server` row with a policy row per tool: `effects` by tool name, else
-        `default` (`None` writes no row, which is a deny)."""
+        `default` (`None` writes no row, which is a deny). `pinned` is whether an admin accepted its
+        tools; an unpinned third party offers nothing."""
         await execute(
-            "insert into mcp_server (id, name, url, enabled, created_at, updated_at) "
-            "values ('lab', 'lab', %s, %s, now(), now())",
-            (LAB_URL, enabled),
+            "insert into mcp_server (id, name, url, enabled, pinned_tool_definition, created_at, "
+            "updated_at) values ('lab', 'lab', %s, %s, %s, now(), now())",
+            (LAB_URL, enabled, pin_document(LAB_TOOLS) if pinned else None),
         )
         for tool in LAB_TOOLS:
             effect = (effects or {}).get(tool.name, default)
@@ -143,6 +175,7 @@ async def mcp_servers() -> AsyncIterator[Servers]:
     """`knowledge` (real) and `lab` (scripted) in process, with the client's transport pointed at
     them."""
     lab = Lab()
+    github = Github()
     hosts = Hosts()
     async with AsyncExitStack() as stack:
         knowledge = create_app()
@@ -151,8 +184,13 @@ async def mcp_servers() -> AsyncIterator[Servers]:
         lab_app = build_app(LAB_TOOLS, lab.call, token=None, allowed_hosts=[LAB_HOST])
         await stack.enter_async_context(lab_app.lifespan())
         hosts.apps[LAB_HOST] = lab_app
+        github_app = create_github_app(
+            github, token=env.github_mcp_token, allowed_hosts=[GITHUB_HOST]
+        )
+        await stack.enter_async_context(github_app.lifespan())
+        hosts.apps[GITHUB_HOST] = github_app
         mcp.use_transport(httpx2.ASGITransport(app=hosts))
         try:
-            yield Servers(hosts=hosts, lab=lab)
+            yield Servers(hosts=hosts, lab=lab, github=github)
         finally:
             mcp.use_transport(None)

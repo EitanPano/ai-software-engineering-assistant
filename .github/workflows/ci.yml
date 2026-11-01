@@ -57,7 +57,8 @@ jobs:
           retention-days: 7
 
   # `verify` never starts the image, so this is what catches a production-only failure: a package
-  # in the dev group, a broken Dockerfile, a migration that fails on an empty database.
+  # in the dev group, a broken Dockerfile, a migration that fails on an empty database. The `github`
+  # profile starts the gateway too: its `/health` reaches no upstream, so a random PAT is enough.
   image:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -67,14 +68,14 @@ jobs:
         env:
           DATABASE_URL: postgres://app:app@database:5432/app
         run: |
-          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET OTP_SECRET ENCRYPTION_KEY ANTHROPIC_API_KEY VOYAGE_API_KEY KNOWLEDGE_MCP_TOKEN; do
+          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET OTP_SECRET ENCRYPTION_KEY ANTHROPIC_API_KEY VOYAGE_API_KEY KNOWLEDGE_MCP_TOKEN GITHUB_MCP_PAT GITHUB_MCP_TOKEN; do
             export "$name=$(openssl rand -base64 32)"
           done
-          docker compose --profile app up --build --wait --wait-timeout 120
+          docker compose --profile app --profile github up --build --wait --wait-timeout 120
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8000/
       - name: Show the logs
         if: failure()
-        run: docker compose --profile app logs --no-color
+        run: docker compose --profile app --profile github logs --no-color
 
   secrets:
     runs-on: ubuntu-24.04

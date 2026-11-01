@@ -40,6 +40,11 @@ services:
       # backend does not wait for the server: an outage of it never stops the API.
       KNOWLEDGE_MCP_URL: http://knowledge:8001/mcp
       KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
+      # How the agent reaches the GitHub gateway (profile `github`), and the bearer token they share.
+      # Never the personal access token: only the gateway holds it. No depends_on: an outage of the
+      # GitHub half never stops the API.
+      GITHUB_MCP_URL: http://github-gateway:8002/mcp
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN-}
     # Single, on loopback: the stack is built for local use and agent runs spend the owner's key, so
     # nothing else on the network reaches it. With TRUST_PROXY false no caller can choose its own
     # client IP through X-Forwarded-For. A public host changes this line (README › Usage).
@@ -90,6 +95,8 @@ services:
       LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
       APP_PROCESS: backend
       KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
+      GITHUB_MCP_URL: http://github-gateway:8002/mcp
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN-}
     command: python -m app.infra.scripts.migrate
     restart: "no"
     profiles:
@@ -127,6 +134,46 @@ services:
         condition: service_healthy
       backend-migrate:
         condition: service_completed_successfully
+  github-mcp:
+    # GitHub's own MCP server, v2.0.3, pinned by digest. Limited to the seven tools the agent is
+    # offered; lockdown withholds public content by authors without push access. It is given no
+    # token: it reads the personal access token from each request's Authorization, sent by the
+    # gateway, and stores it nowhere. Under the `github` profile only (`--profile github`).
+    image: ghcr.io/github/github-mcp-server@sha256:250bc6ce70788207608ef74cef4397230ff2e8481218da74d6093e4bd9101132
+    command: http
+    environment:
+      GITHUB_TOOLS: get_file_contents,issue_read,list_issues,pull_request_read,list_pull_requests,issue_write,add_issue_comment
+      GITHUB_LOCKDOWN_MODE: "true"
+    # Loopback only: the upstream of a gateway started by hand (`uv run poe github-gateway`), whose
+    # default GITHUB_MCP_UPSTREAM_URL is http://127.0.0.1:8082/. The Compose gateway reaches this
+    # service by name on the Compose network and does not need the port.
+    ports: [ "127.0.0.1:8082:8082" ]
+    profiles: [ "github" ]
+  github-gateway:
+    # The one process that holds the personal access token (GITHUB_MCP_PAT, from the shell or from
+    # backend/.env.github given as `docker compose --env-file backend/.env.github`). The
+    # backend's image; it checks the bearer token, adds the PAT and forwards to `github-mcp`. No
+    # published port: only the backend, on this network, can call it.
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    command: python -m app.github_gateway_main
+    environment:
+      APP_ENV: production
+      APP_PROCESS: github_gateway
+      PORT: "8002"
+      GITHUB_MCP_PAT: ${GITHUB_MCP_PAT-}
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN-}
+      GITHUB_MCP_UPSTREAM_URL: http://github-mcp:8082/
+    profiles: [ "github" ]
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8002/health', timeout=2)" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
   frontend:
     # A build-only service that the server's build reads as its spa context (Compose 2.35.0 or
     # newer). No depends_on (the server's build waits for this one), no environment, no container.

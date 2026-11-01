@@ -12,6 +12,7 @@ from app.services.anthropic import (
     InvalidModelOutput,
     ModelUnavailable,
     TurnResult,
+    count_tokens,
     echo_blocks,
     served_blocks,
     stream_turn,
@@ -261,6 +262,51 @@ class TestMalformedToolInput:
         assert "SECRET-QUERY-TEXT" not in rendered
         assert failure.value.__cause__ is None
         assert failure.value.__suppress_context__ is True
+
+
+class TestCountTokens:
+    @staticmethod
+    def client(handler: httpx2.MockTransport) -> tuple[AsyncAnthropic, httpx2.AsyncClient]:
+        http = httpx2.AsyncClient(transport=handler, base_url="http://fake")
+        return AsyncAnthropic(
+            api_key="test", base_url="http://fake", http_client=http, max_retries=0
+        ), http
+
+    async def test_sends_the_system_and_the_tools_as_given_and_returns_the_count(self) -> None:
+        seen: list[dict[str, object]] = []
+
+        def respond(request: httpx2.Request) -> httpx2.Response:
+            seen.append(json.loads(request.content))
+            assert request.url.path == "/v1/messages/count_tokens"
+            return httpx2.Response(200, json={"input_tokens": 4321})
+
+        client, http = self.client(httpx2.MockTransport(respond))
+        use_client(client)
+        try:
+            counted = await count_tokens([SEARCH_DEFINITION], system=SYSTEM)
+        finally:
+            use_client(None)
+            await http.aclose()
+
+        assert counted == 4321
+        assert seen[0]["system"] == SYSTEM
+        assert seen[0]["tools"] == [SEARCH_DEFINITION]
+        assert "max_tokens" not in seen[0]
+
+    async def test_a_refused_request_propagates(self) -> None:
+        def refuse(request: httpx2.Request) -> httpx2.Response:
+            del request
+            body = {"type": "error", "error": {"type": "invalid_request_error", "message": "no"}}
+            return httpx2.Response(400, json=body)
+
+        client, http = self.client(httpx2.MockTransport(refuse))
+        use_client(client)
+        try:
+            with pytest.raises(BadRequestError):
+                await count_tokens([SEARCH_DEFINITION], system=SYSTEM)
+        finally:
+            use_client(None)
+            await http.aclose()
 
 
 class TestBlocks:

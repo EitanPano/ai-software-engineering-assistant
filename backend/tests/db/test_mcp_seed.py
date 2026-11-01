@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from importlib.resources import files
 
+import psycopg.errors
 import pytest
 
 from app.infra.scripts import mcp_seed
@@ -26,6 +27,7 @@ class _Server:
     url: str | None
     enabled: bool
     tool_definition: list[object] | None
+    pinned_tool_definition: list[object] | None
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,9 @@ class _Policy:
 
 async def _rows() -> tuple[list[_Server], list[_Policy]]:
     servers = await fetch_all(
-        _Server, "select id, name, url, enabled, tool_definition from mcp_server order by id"
+        _Server,
+        "select id, name, url, enabled, tool_definition, pinned_tool_definition "
+        "from mcp_server order by id",
     )
     policies = await fetch_all(
         _Policy, "select id, mcp_server_id, tool_name, effect from tool_policy order by id"
@@ -46,21 +50,47 @@ async def _rows() -> tuple[list[_Server], list[_Policy]]:
     return servers, policies
 
 
-# What the migration inserts, written out: the test fails when the file and this list drift.
+# What the migrations insert, written out: the test fails when a file and this list drift. `github`
+# ships disabled and unpinned, so nothing is offered until an admin accepts it; its reads are
+# `allow`, its two writes `ask`.
 SEEDED = (
-    [_Server("knowledge", "knowledge", None, True, None)],
-    [_Policy("knowledge-search", "knowledge", "search", "allow")],
+    [
+        _Server("github", "github", None, False, None, None),
+        _Server("knowledge", "knowledge", None, True, None, None),
+    ],
+    [
+        _Policy("github-add_issue_comment", "github", "add_issue_comment", "ask"),
+        _Policy("github-get_file_contents", "github", "get_file_contents", "allow"),
+        _Policy("github-issue_read", "github", "issue_read", "allow"),
+        _Policy("github-issue_write", "github", "issue_write", "ask"),
+        _Policy("github-list_issues", "github", "list_issues", "allow"),
+        _Policy("github-list_pull_requests", "github", "list_pull_requests", "allow"),
+        _Policy("github-pull_request_read", "github", "pull_request_read", "allow"),
+        _Policy("knowledge-search", "knowledge", "search", "allow"),
+    ],
 )
 
 
 class TestSeedStatements:
-    def test_are_the_two_inserts_of_the_migration(self) -> None:
+    def test_are_the_inserts_of_both_migrations_in_file_order(self) -> None:
         statements = seed_statements()
 
-        assert len(statements) == 2
-        assert statements[0].startswith("insert into mcp_server")
-        assert statements[1].startswith("insert into tool_policy")
+        assert len(statements) == 4
+        assert [statement.split("(", 1)[0].strip() for statement in statements] == [
+            "insert into mcp_server",
+            "insert into tool_policy",
+            "insert into mcp_server",
+            "insert into tool_policy",
+        ]
         assert all(statement.endswith(";") for statement in statements)
+        assert "'github'" in statements[2]
+
+    def test_the_policies_of_github_match_the_recorded_tools(self) -> None:
+        from tests.fake_github_mcp import recorded_tools
+
+        github = {policy.tool_name for policy in SEEDED[1] if policy.mcp_server_id == "github"}
+
+        assert github == {tool.name for tool in recorded_tools()}
 
 
 OLD_PROMPT = (
@@ -189,11 +219,36 @@ class TestBackfill:
 
 
 @store_backed
+class TestUrlCheck:
+    """`0011` rebuilds `mcp_server_url_check` under its name: a server with no address of its own
+    is `knowledge` or `github`, whose addresses are environment variables."""
+
+    async def test_a_third_party_server_without_an_address_is_refused(self) -> None:
+        await reset_store()
+
+        with pytest.raises(psycopg.errors.CheckViolation, match="mcp_server_url_check"):
+            await execute(
+                "insert into mcp_server (id, name, url, enabled, created_at, updated_at) "
+                "values ('lab', 'lab', null, true, now(), now())"
+            )
+
+    async def test_github_may_have_none(self) -> None:
+        await reset_store()
+        await execute("delete from mcp_server where name = 'github'")
+
+        await execute(
+            "insert into mcp_server (id, name, url, enabled, created_at, updated_at) "
+            "values ('github', 'github', null, false, now(), now())"
+        )
+
+
+@store_backed
 class TestRestore:
     async def test_a_reset_restores_the_rows_the_migration_inserts(self) -> None:
         await reset_store()
         await execute(
-            "update mcp_server set enabled = false, url = 'http://x/mcp', tool_definition = '[]'"
+            "update mcp_server set enabled = not enabled, url = 'http://x/mcp', "
+            "tool_definition = '[]', pinned_tool_definition = '[]'"
         )
         await execute("update tool_policy set effect = 'deny'")
         await execute(

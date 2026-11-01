@@ -38,8 +38,9 @@ export function ToolStatusBadge({ status }: { status: ToolStatus }) {
 
 // One tool call in place in the answer: its name and status, the input it was given and, once it
 // finished, its output. Input and output are plain text, never rendered as Markdown or HTML.
-// While the call waits for a person its arguments show whole, pretty-printed, in a scroll box the
-// keyboard can reach, and `actions` (the decision buttons) sit below them.
+// While the call waits for a person its arguments show whole, pretty-printed, in a labelled group
+// with no height cap and no inner scroll (a person approves what they have read in full, however
+// long), and `actions` (the decision buttons) come after all of them. Only the output scrolls.
 export function ToolCallRow({
   call,
   actions,
@@ -55,13 +56,7 @@ export function ToolCallRow({
         <ToolStatusBadge status={call.status} />
       </div>
       {waiting ? (
-        <div
-          role="group"
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scroll box must take focus
-          tabIndex={0}
-          aria-label={`Arguments of ${call.name}`}
-          className="max-h-64 overflow-auto rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        >
+        <div role="group" aria-label={`Arguments of ${call.name}`}>
           <pre className="font-mono text-xs break-words whitespace-pre-wrap">
             {visibleText(JSON.stringify(call.input, null, 2))}
           </pre>

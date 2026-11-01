@@ -85,6 +85,18 @@ describe('playwright.config.ts', () => {
     expect(api).not.toHaveProperty('stdout')
   })
 
+  it('points the API at the GitHub MCP fake in the Anthropic fake process, with a placeholder token', async () => {
+    const config = await load({ E2E_BASE_URL: '', E2E_DATABASE_URL: 'postgres://u:p@h/app_e2e' })
+    const servers = [config.webServer ?? []].flat()
+    const api = servers.find((server) => server.command.includes('app.main'))
+
+    expect(api?.env?.GITHUB_MCP_URL).toBe('http://127.0.0.1:8101/github/mcp')
+    expect(api?.env?.GITHUB_MCP_TOKEN).toBeTruthy()
+    expect(api?.env?.GITHUB_MCP_TOKEN).not.toMatch(/^(ghp_|github_pat_)/)
+    // The PAT belongs to the gateway alone, never to the API.
+    expect(api?.env).not.toHaveProperty('GITHUB_MCP_PAT')
+  })
+
   it('seeds the ask tool after the e2e database is prepared and before the API starts', async () => {
     const config = await load({ E2E_BASE_URL: '', E2E_DATABASE_URL: 'postgres://u:p@h/app_e2e' })
     const servers = [config.webServer ?? []].flat()

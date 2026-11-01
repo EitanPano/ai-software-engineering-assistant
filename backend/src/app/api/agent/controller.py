@@ -60,6 +60,7 @@ _DENIED_OUTPUT: Final = "this tool is not permitted"
 _REJECTED_OUTPUT: Final = "a person rejected this tool call"
 _INVALID_INPUT_OUTPUT: Final = "invalid input"
 _BUDGET_OUTPUT: Final = "the tool call limit for this run is spent"
+_CUT_NOTE: Final = "\n[output cut: it was longer than fits; ask for less]"
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,8 @@ class _Cleared:
 
 async def _clear(name: str, raw: dict[str, object], prefix: ConversationPrefix) -> _Call | _Cleared:
     """The gates, in order: a name no enabled server owns, a policy that is not `allow` or `ask`,
-    a tool the model was not offered, then the input against the offered schema. A refusal is the
+    a tool the model was not offered, a third-party definition that no longer equals its pin
+    (`tool.pin_holds`), then the input against the offered schema. A refusal is the
     call's answer; a call that passes is `_Cleared`, and what happens next (run it, or wait for a
     person) is the caller's. Nothing here reaches a server."""
     owner = await _owner(name)
@@ -179,8 +181,13 @@ async def _clear(name: str, raw: dict[str, object], prefix: ConversationPrefix) 
         return _denied(owner)
     definition = next((d for d in prefix.tool_definition if d.get("name") == name), None)
     schema = None if definition is None else definition.get("input_schema")
-    if not isinstance(schema, dict):
+    if definition is None or not isinstance(schema, dict):
         # Not offered to the model in this conversation: its prefix never named it.
+        return _denied(owner)
+    if not tool.pin_holds(server, tool_name, definition):
+        # What the conversation was offered, or the server's last listing, is not what an admin
+        # accepted: a changed or re-pinned tool. The server and tool are logged, never the schema.
+        log.warning("tool definition changed", {"server": server.name, "tool": tool_name})
         return _denied(owner)
     try:
         arguments = tool.validate_input(schema, raw)
@@ -189,16 +196,19 @@ async def _clear(name: str, raw: dict[str, object], prefix: ConversationPrefix) 
     return _Cleared(server, tool_name, arguments, decision)
 
 
+def _cut(output: str) -> str:
+    """The output within `AGENT_TOOL_OUTPUT_MAX_CHARS`; a longer one ends with a fixed note, so the
+    model knows the rest is missing rather than reading a file that stops mid-line."""
+    if len(output) <= AGENT_TOOL_OUTPUT_MAX_CHARS:
+        return output
+    return output[: AGENT_TOOL_OUTPUT_MAX_CHARS - len(_CUT_NOTE)] + _CUT_NOTE
+
+
 async def _execute(cleared: _Cleared) -> _Call:
     outcome = await call_server_tool(
         server=cleared.server, tool_name=cleared.tool_name, arguments=cleared.arguments
     )
-    return _Call(
-        outcome.status,
-        outcome.output[:AGENT_TOOL_OUTPUT_MAX_CHARS],
-        cleared.server.id,
-        cleared.tool_name,
-    )
+    return _Call(outcome.status, _cut(outcome.output), cleared.server.id, cleared.tool_name)
 
 
 def _result_block(tool_use_id: str, call: _Call) -> Block:

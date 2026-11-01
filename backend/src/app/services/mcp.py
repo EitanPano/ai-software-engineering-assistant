@@ -14,6 +14,19 @@ replica answers), refuses a request without the bearer token before the SDK sees
 `Host` header against the names it is reached by (the SDK's DNS rebinding protection), and answers
 `GET /health` without the token and without touching a store.
 
+A call to a third-party server (`call_tool(..., pinned=)`) lists in its own session first and calls
+nothing when the live definition differs from the pinned one (`ToolDefinitionChanged`). The listing
+is also what protocol `2026-07-28` needs: a server refuses a call whose `x-mcp-header` arguments
+lack their `Mcp-Param-*` headers, and the client writes them only for a tool its session listed. A
+result is its text blocks and its embedded text files joined; a blob stays out.
+
+Gateway: `build_gateway` is the one process that holds a credential for a third party. It answers
+`POST /mcp` behind the same bearer check as `build_app`, adds the credential the caller never held,
+and forwards to the upstream's `/`. A method other than POST is a 405 and any other path a 404; only
+`accept`, `content-type` and `mcp-*` headers cross (`x-mcp-*` among them cannot widen what the
+upstream offers); the upstream's answer is streamed as it arrives, because it may be an event
+stream; nothing of a header is logged.
+
 A test replaces the transport (`use_transport`) like `services/voyage.py` replaces its client, and
 reaches a server with no socket.
 """
@@ -33,16 +46,37 @@ from mcp.server.context import ServerRequestContext
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.config.constants import MCP
+from app.config.constants import MAX_BODY_BYTES, MCP
 from app.models.mcp_server.constants import SEARCH_TOOL
-from app.models.mcp_server.type import ListedTool
+from app.models.mcp_server.type import ListedTool, same_definition
 from app.models.search.enums import ToolSearchCode
 from app.models.search.type import ToolSearchFailed
 from app.services.logger import log
 from app.services.security.crypto import constant_time_equals
 
 BEARER: Final = "Bearer "
-type ToolCaller = Callable[[str, dict[str, object]], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class EmbeddedFile:
+    """A file a result embeds: text, or a base64 blob (which `call_tool` leaves out)."""
+
+    uri: str
+    text: str | None = None
+    blob: str | None = None
+    mime_type: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolReply:
+    """A result with embedded files, as `get_file_contents` answers: a line that says it worked,
+    then the file."""
+
+    text: str
+    files: tuple[EmbeddedFile, ...] = ()
+
+
+type ToolCaller = Callable[[str, dict[str, object]], Awaitable[str | ToolReply]]
 
 _state: dict[str, httpx2.AsyncBaseTransport] = {}
 
@@ -63,6 +97,12 @@ def _leaf(error: BaseException) -> BaseException:
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
     return error
+
+
+class ToolDefinitionChanged(Exception):  # noqa: N818  # named for what the caller must treat it as
+    """The live definition of a tool differs from the pinned one, or the tool is gone: nothing was
+    called. It is not `McpUnavailable`: the server answered, and answered something else than what
+    an admin accepted."""
 
 
 class ToolFailure(Exception):  # noqa: N818  # named for the error result it becomes
@@ -98,11 +138,24 @@ def _http_client(token: str | None, seconds: float, errors: list[int]) -> httpx2
         if response.status_code >= 400:
             errors.append(response.status_code)
 
+    # No proxy from the environment: a bearer token must never reach one. A third-party row shares
+    # this client, so one that needs a proxy has to change it.
     return httpx2.AsyncClient(
         transport=_state.get("transport"),
         headers=headers,
         timeout=httpx2.Timeout(seconds),
         event_hooks={"response": [note]},
+        trust_env=False,
+    )
+
+
+def _upstream_client() -> httpx2.AsyncClient:
+    """The gateway's client to `github-mcp-server`. `trust_env` is off for the reason above, and
+    here the bearer is the personal access token, sent over plain HTTP."""
+    return httpx2.AsyncClient(
+        transport=_state.get("transport"),
+        timeout=httpx2.Timeout(MCP.call_seconds),
+        trust_env=False,
     )
 
 
@@ -136,35 +189,65 @@ async def _in_own_task[T](
         raise McpUnavailable("timeout") from error
 
 
+def _listed(tool: types.Tool) -> ListedTool:
+    return ListedTool(
+        name=tool.name, description=tool.description or "", input_schema=dict(tool.input_schema)
+    )
+
+
 async def list_tools(url: str, *, token: str | None) -> list[ListedTool]:
     """The tools the server at `url` offers, or `McpUnavailable`."""
 
     async def work(client: Client) -> list[ListedTool]:
         listing = await client.list_tools()
-        return [
-            ListedTool(
-                name=tool.name,
-                description=tool.description or "",
-                input_schema=dict(tool.input_schema),
-            )
-            for tool in listing.tools
-        ]
+        return [_listed(tool) for tool in listing.tools]
 
     return await _in_own_task(url, token, MCP.list_seconds, work)
 
 
+def _result_text(content: Sequence[types.ContentBlock]) -> str:
+    """The text blocks and the embedded text files, in order, one per line. A blob (an image, a
+    binary file) is not text the model can read, so it stays out."""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, types.TextContent):
+            parts.append(block.text)
+        elif isinstance(block, types.EmbeddedResource) and isinstance(
+            block.resource, types.TextResourceContents
+        ):
+            parts.append(block.resource.text)
+    return "\n".join(parts)
+
+
 async def call_tool(
-    url: str, name: str, arguments: dict[str, object], *, token: str | None
+    url: str,
+    name: str,
+    arguments: dict[str, object],
+    *,
+    token: str | None,
+    pinned: ListedTool | None = None,
 ) -> ToolResult:
     """One call of `name`, or `McpUnavailable`. A tool that fails is an `is_error` result, not an
-    exception: the model gets to see it."""
+    exception: the model gets to see it.
 
-    async def work(client: Client) -> ToolResult:
+    With `pinned`, the session lists first and the call is made only when the tool is listed and
+    equals the pin; otherwise `ToolDefinitionChanged` and nothing is called. The listing is in the
+    call's own session, so a change during a long approval is caught here, and it is what makes the
+    client send a tool's `Mcp-Param-*` headers."""
+
+    async def work(client: Client) -> ToolResult | None:
+        if pinned is not None:
+            listing = await client.list_tools()
+            live = next((_listed(t) for t in listing.tools if t.name == name), None)
+            if live is None or not same_definition(live, pinned):
+                return None
         result = await client.call_tool(name, arguments)
-        texts = [block.text for block in result.content if isinstance(block, types.TextContent)]
-        return ToolResult(text="\n".join(texts), is_error=result.is_error)
+        return ToolResult(text=_result_text(result.content), is_error=result.is_error)
 
-    return await _in_own_task(url, token, MCP.call_seconds, work)
+    outcome = await _in_own_task(url, token, MCP.call_seconds, work)
+    if outcome is None:
+        raise ToolDefinitionChanged(name)
+    return outcome
 
 
 async def _send_json(
@@ -252,6 +335,20 @@ class McpApp:
             await self._inner(scope, receive, send)
 
 
+def _embedded(file: EmbeddedFile) -> types.EmbeddedResource:
+    if file.text is not None:
+        return types.EmbeddedResource(
+            resource=types.TextResourceContents(
+                uri=file.uri, text=file.text, mime_type=file.mime_type
+            )
+        )
+    return types.EmbeddedResource(
+        resource=types.BlobResourceContents(
+            uri=file.uri, blob=file.blob or "", mime_type=file.mime_type
+        )
+    )
+
+
 def build_app(
     tools: Sequence[ListedTool],
     call: ToolCaller,
@@ -259,10 +356,13 @@ def build_app(
     token: str | None,
     allowed_hosts: Sequence[str],
     around: Callable[[], AbstractAsyncContextManager[None]] | None = None,
+    name: str = "knowledge",
+    json_response: bool = True,
 ) -> McpApp:
-    """A stateless MCP server over `tools`. `call(name, arguments)` returns the text of a result or
-    raises `ToolFailure`; a name that is not listed fails as `unknown_tool` before `call` runs.
-    `token` is the bearer secret (`None` serves anyone, for a test of the SDK only)."""
+    """A stateless MCP server over `tools`. `call(name, arguments)` returns the text of a result
+    (or a `ToolReply` with embedded files) or raises `ToolFailure`; a name that is not listed fails
+    as `unknown_tool` before `call` runs. `token` is the bearer secret (`None` serves anyone, for a
+    test of the SDK only). `json_response` false answers as an event stream, as others may."""
     by_name = {tool.name: tool for tool in tools}
 
     async def on_list_tools(
@@ -285,19 +385,21 @@ def build_app(
         try:
             if params.name not in by_name:
                 raise ToolFailure("unknown_tool")
-            text = await call(params.name, dict(params.arguments or {}))
+            reply = await call(params.name, dict(params.arguments or {}))
         except ToolFailure as failure:
             return types.CallToolResult(
                 content=[types.TextContent(text=failure.code)], is_error=True
             )
-        return types.CallToolResult(content=[types.TextContent(text=text)])
+        if isinstance(reply, str):
+            return types.CallToolResult(content=[types.TextContent(text=reply)])
+        content: list[types.ContentBlock] = [types.TextContent(text=reply.text)]
+        content.extend(_embedded(file) for file in reply.files)
+        return types.CallToolResult(content=content)
 
-    server: Server[None] = Server(
-        "knowledge", on_list_tools=on_list_tools, on_call_tool=on_call_tool
-    )
+    server: Server[None] = Server(name, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
     starlette = server.streamable_http_app(
         stateless_http=True,
-        json_response=True,
+        json_response=json_response,
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
             allowed_hosts=list(allowed_hosts),
@@ -340,3 +442,100 @@ def serve(
             raise ToolFailure(ToolSearchCode.search_unavailable.value) from None
 
     return build_app([SEARCH_TOOL], call, token=token, allowed_hosts=allowed_hosts, around=around)
+
+
+_FORWARD_EXACT: Final = frozenset({b"accept", b"content-type"})
+_FORWARD_PREFIX: Final = b"mcp-"
+_RETURN_EXACT: Final = frozenset({"content-type", "cache-control"})
+
+
+def _forwarded(headers: Sequence[tuple[bytes, bytes]], credential: str) -> dict[str, str]:
+    """The request headers the upstream receives: an allow-list, then the credential. `x-mcp-*`
+    headers are not on it, so a caller cannot widen what the upstream offers (its toolsets, its
+    read-only mode); `authorization` is replaced, never passed."""
+    passed = {
+        name.decode("latin-1"): value.decode("latin-1")
+        for name, value in headers
+        if name in _FORWARD_EXACT or name.startswith(_FORWARD_PREFIX)
+    }
+    passed["authorization"] = f"{BEARER}{credential}"
+    return passed
+
+
+async def _read_body(receive: Receive) -> bytes | None:
+    """The request body, or `None` when it passes `MAX_BODY_BYTES` or the caller went away."""
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        message = await receive()
+        if message["type"] == "http.disconnect":
+            return None
+        chunk: bytes = message.get("body", b"")
+        size += len(chunk)
+        if size > MAX_BODY_BYTES:
+            return None
+        chunks.append(chunk)
+        if not message.get("more_body", False):
+            return b"".join(chunks)
+
+
+class _Forwarder:
+    """The gateway's inner app: `POST` to the upstream with its credential, streaming the answer."""
+
+    def __init__(self, upstream_url: str, credential: str) -> None:
+        self._url = upstream_url
+        self._credential = credential
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["method"] != "POST":
+            await _send_json(send, 405, b'{"error":"method_not_allowed"}', [(b"allow", b"POST")])
+            return
+        body = await _read_body(receive)
+        if body is None:
+            await _send_json(send, 413, b'{"error":"payload_too_large"}', [])
+            return
+        started = False
+        try:
+            async with (
+                _upstream_client() as http,
+                http.stream(
+                    "POST",
+                    self._url,
+                    content=body,
+                    headers=_forwarded(scope["headers"], self._credential),
+                ) as upstream,
+            ):
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": upstream.status_code,
+                        "headers": [
+                            (name.encode("latin-1"), value.encode("latin-1"))
+                            for name, value in upstream.headers.items()
+                            if name.lower() in _RETURN_EXACT or name.lower().startswith("mcp-")
+                        ],
+                    }
+                )
+                started = True
+                # As it arrives: the upstream may answer with an event stream, not one JSON body.
+                async for chunk in upstream.aiter_bytes():
+                    await send({"type": "http.response.body", "body": chunk, "more_body": True})
+                await send({"type": "http.response.body", "body": b""})
+        except httpx2.HTTPError as error:
+            # The class only: an exception's text can carry the address, never a header.
+            log.warning("github upstream unavailable", {"reason": type(error).__name__})
+            if not started:
+                await _send_json(send, 503, b'{"error":"upstream_unavailable"}', [])
+            else:
+                await send({"type": "http.response.body", "body": b""})
+
+
+def build_gateway(*, upstream_url: str, pat: str, token: str) -> McpApp:
+    """The GitHub gateway: `POST /mcp` with `Authorization: Bearer <token>` (constant-time compare,
+    else 401 before anything is forwarded) goes to `upstream_url` with `pat` as its bearer. The API
+    holds `token` and never `pat`; the upstream sees `pat` per request and stores it nowhere."""
+
+    async def lifespan() -> AsyncIterator[None]:
+        yield
+
+    return McpApp(_Forwarder(upstream_url, pat), lifespan, token)

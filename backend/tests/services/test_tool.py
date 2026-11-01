@@ -1,8 +1,11 @@
 import json
+from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 
-from app.models.mcp_server.type import ListedTool
+from app.models.mcp_server.interface import McpServerRecord
+from app.models.mcp_server.type import ListedTool, canonical
 from app.models.tool_policy.enums import PolicyEffect
 from app.services import tool
 from app.services.tool import InvalidToolInput
@@ -30,6 +33,25 @@ class TestDecide:
         assert tool.decide(PolicyEffect.deny) == "deny"
         # Plan 011: `ask` waits for a person; plan 010 refused it like `deny`.
         assert tool.decide(PolicyEffect.ask) == "ask"
+
+
+class TestCanonical:
+    """`canonical` must give the form JSONB gives back, or an unchanged tool is never offered."""
+
+    @pytest.mark.parametrize(
+        ("sent", "stored"),
+        [(1e16, 10**16), (1e22, 10**22), (-1e16, -(10**16)), (-0.0, 0.0), ([1e16], [10**16])],
+    )
+    def test_a_float_jsonb_rewrites_compares_equal_to_what_it_becomes(
+        self, sent: object, stored: object
+    ) -> None:
+        assert canonical("t", "d", {"n": sent}) == canonical("t", "d", {"n": stored})
+
+    @pytest.mark.parametrize(
+        ("a", "b"), [(0, False), (1, True), (1, 1.0), (0, 0.0), (1e15, 10**15), (1e16, 1)]
+    )
+    def test_values_json_tells_apart_stay_apart(self, a: object, b: object) -> None:
+        assert canonical("t", "d", {"n": a}) != canonical("t", "d", {"n": b})
 
 
 class TestArgumentsDigest:
@@ -73,22 +95,36 @@ class TestNames:
 
 
 class TestDefinitions:
-    def test_are_sorted_by_name_and_strict(self) -> None:
+    def test_are_sorted_by_name_and_strict_on_knowledge_alone(self) -> None:
+        # Plan 012: `strict` needs a closed schema and refuses `minimum` and `minLength`, which a
+        # third party's definitions use, so it stays on the server we wrote.
         definitions = tool.definitions(
-            {"lab": [listed("zeta"), listed("alpha")], "aaa": [listed("x")]}
+            {"lab": [listed("zeta"), listed("alpha")], "knowledge": [listed("search")]}
         )
 
         assert [definition["name"] for definition in definitions] == [
-            "aaa__x",
+            "knowledge__search",
             "lab__alpha",
             "lab__zeta",
         ]
         assert definitions[0]["strict"] is True
-        assert definitions[0]["eager_input_streaming"] is True
-        assert definitions[0]["description"] == "x tool"
+        assert all("strict" not in definition for definition in definitions[1:])
+        assert all(definition["eager_input_streaming"] is True for definition in definitions)
+        assert definitions[0]["description"] == "search tool"
         schema = definitions[0]["input_schema"]
         assert isinstance(schema, dict)
         assert schema["additionalProperties"] is False
+
+    def test_a_third_party_definition_is_sent_as_accepted_with_its_keywords(self) -> None:
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {"n": {"type": "integer", "minimum": 1, "x-mcp-header": "n"}},
+        }
+
+        definition = tool.definitions({"github": [listed("issue_read", schema)]})[0]
+
+        assert definition["input_schema"] == schema
+        assert "strict" not in definition
 
     def test_are_byte_stable(self) -> None:
         listings = {"lab": [listed("b"), listed("a")]}
@@ -99,7 +135,7 @@ class TestDefinitions:
         assert first == second
 
     def test_adds_strict_and_streaming_once(self) -> None:
-        definition = tool.definitions({"lab": [listed("echo")]})[0]
+        definition = tool.definitions({"knowledge": [listed("search")]})[0]
 
         assert list(definition) == [
             "name",
@@ -108,6 +144,117 @@ class TestDefinitions:
             "strict",
             "eager_input_streaming",
         ]
+
+    def test_a_third_party_definition_has_no_strict_key(self) -> None:
+        definition = tool.definitions({"lab": [listed("echo")]})[0]
+
+        assert list(definition) == ["name", "description", "input_schema", "eager_input_streaming"]
+
+
+NOW = datetime(2026, 11, 1, tzinfo=UTC)
+
+
+def server(
+    name: str = "lab",
+    *,
+    pinned: list[ListedTool] | None,
+    listing: list[ListedTool] | None = None,
+) -> McpServerRecord:
+    return McpServerRecord(
+        "id", name, "http://lab/mcp", True, listing, NOW, NOW, pinned_tool_definition=pinned
+    )
+
+
+def offered(entry: ListedTool, name: str = "lab__echo") -> dict[str, object]:
+    return tool.definitions({"lab": [entry]})[0] | {"name": name}
+
+
+class TestListingChanges:
+    def test_a_name_is_shown_escaped_so_it_cannot_move_a_cursor(self) -> None:
+        hostile = "x\x1b[2J\x1b[Hunchanged from the pin"
+
+        (line,) = tool.listing_changes(None, [listed(hostile)])
+
+        assert "\x1b" not in line
+        assert line.startswith("added: x")
+
+    def test_a_name_listed_twice_is_a_change_unless_every_copy_matches(self) -> None:
+        pin = listed("a")
+        other = replace(pin, description="a different one")
+
+        assert tool.listing_changes([pin], [other, pin]) == ["changed: a"]
+        assert tool.listing_changes([pin], [pin, pin]) == []
+
+
+class TestPinHolds:
+    """The pin is what an admin accepted: a call runs only while the pin, the last listing and the
+    definition the conversation was offered all agree."""
+
+    def test_holds_when_the_listing_and_the_offer_equal_the_pin(self) -> None:
+        pin = listed("echo")
+
+        assert tool.pin_holds(server(pinned=[pin], listing=[pin]), "echo", offered(pin))
+
+    def test_knowledge_is_not_pinned_and_always_holds(self) -> None:
+        record = server("knowledge", pinned=None)
+
+        assert tool.pin_holds(record, "search", offered(listed("search"), "knowledge__search"))
+
+    def test_an_unpinned_server_never_holds(self) -> None:
+        assert not tool.pin_holds(server(pinned=None), "echo", offered(listed("echo")))
+
+    def test_a_tool_the_pin_does_not_name_never_holds(self) -> None:
+        pin = listed("echo")
+
+        assert not tool.pin_holds(server(pinned=[pin], listing=[pin]), "other", offered(pin))
+
+    def test_a_changed_listing_description_denies(self) -> None:
+        pin = listed("echo")
+        changed = replace(pin, description="Do something else.")
+
+        assert not tool.pin_holds(server(pinned=[pin], listing=[changed]), "echo", offered(pin))
+
+    def test_a_changed_listing_schema_denies(self) -> None:
+        pin = listed("echo")
+        changed = replace(pin, input_schema={"type": "object"})
+
+        assert not tool.pin_holds(server(pinned=[pin], listing=[changed]), "echo", offered(pin))
+
+    @pytest.mark.parametrize(
+        ("was", "now"), [(0, False), (1, True), (1, 1.0), (False, 0), (0, 0.0)]
+    )
+    def test_a_default_that_python_calls_equal_but_json_does_not_denies(
+        self, was: object, now: object
+    ) -> None:
+        schema: dict[str, object] = {"type": "object", "properties": {"n": {"default": was}}}
+        pin = listed("echo", schema)
+        changed = replace(
+            pin, input_schema={"type": "object", "properties": {"n": {"default": now}}}
+        )
+        assert pin.input_schema == changed.input_schema  # what Python equality would have let by
+
+        assert not tool.pin_holds(server(pinned=[pin], listing=[changed]), "echo", offered(pin))
+        assert not tool.pin_holds(server(pinned=[pin], listing=[pin]), "echo", offered(changed))
+        assert tool.listing_changes([pin], [changed]) == ["changed: echo"]
+
+    def test_a_tool_gone_from_the_listing_denies(self) -> None:
+        pin = listed("echo")
+
+        assert not tool.pin_holds(
+            server(pinned=[pin], listing=[listed("other")]), "echo", offered(pin)
+        )
+
+    def test_a_conversation_offered_an_older_definition_denies(self) -> None:
+        pin = listed("echo")
+        older = replace(pin, description="The text before the re-pin.")
+
+        assert not tool.pin_holds(server(pinned=[pin], listing=[pin]), "echo", offered(older))
+
+    def test_a_server_never_listed_holds_on_the_offer_alone(self) -> None:
+        # `call_tool` lists again in the call's own session, which catches a change in between.
+        pin = listed("echo")
+
+        assert tool.pin_holds(server(pinned=[pin], listing=None), "echo", offered(pin))
 
     def test_leaves_the_servers_schema_untouched(self) -> None:
         schema: dict[str, object] = {"type": "object", "properties": {}}

@@ -23,6 +23,8 @@ const VOYAGE_FAKE_PORT = 8103
 const KNOWLEDGE_PORT = 8104
 // A placeholder both sides share; it signs nothing and protects only this suite's own processes.
 const KNOWLEDGE_TOKEN = 'e2e-placeholder-knowledge-token-not-a-secret'
+// The value the fake GitHub MCP server falls back to when it reads no `GITHUB_MCP_TOKEN` itself.
+const GITHUB_MCP_PLACEHOLDER = 'dev-only-github-mcp-token-not-real-0123456789'
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -110,6 +112,10 @@ export default defineConfig({
             DATABASE_URL: databaseUrl,
             KNOWLEDGE_MCP_URL: `http://127.0.0.1:${KNOWLEDGE_PORT}/mcp`,
             KNOWLEDGE_MCP_TOKEN: KNOWLEDGE_TOKEN,
+            // The fake GitHub MCP server, served from the Anthropic fake's process. The token is a
+            // placeholder it checks; the PAT is the gateway's alone and is not set here.
+            GITHUB_MCP_URL: `http://127.0.0.1:${FAKE_PORT}/github/mcp`,
+            GITHUB_MCP_TOKEN: GITHUB_MCP_PLACEHOLDER,
           },
         },
         {

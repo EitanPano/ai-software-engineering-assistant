@@ -20,7 +20,9 @@ their own Anthropic and Voyage keys; the project hosts neither. For local develo
 git-ignored `backend/.env` may hold them, loaded by an explicit
 `uv run --env-file .env python -m app.main`. This narrows `AGENTS.md › Security` and the line in
 `backend/AGENTS.md`: the app still loads no env file, no gate uses one, so the tests stay keyless,
-and no agent reads one, because the hook stays. Voyage stays as the embedding
+and no agent reads one, because the hook stays. An optional GitHub token is kept apart, in a
+git-ignored `backend/.env.github` that only the GitHub gateway's terminal loads, because a file
+the API also loads would put it in the API's environment. Voyage stays as the embedding
 provider by decision (2026-10-31), not by default: a local model would drop one key at the cost of
 retrieval quality that nothing has measured yet. When two designs both work and neither loses
 something this file requires, take the one with fewer things to install and fewer keys to hold.
@@ -38,8 +40,8 @@ needs a reason in its plan.
 | Need | Use | Not, and why |
 | --- | --- | --- |
 | Agent loop | `anthropic` SDK, a hand-written loop | LangChain, LangGraph, LlamaIndex, Tool Runner, Managed Agents: an approval must pause a run durably, and this loop is what the project demonstrates |
-| MCP | The official `mcp` Python SDK, for our client and the `knowledge` server, on Streamable HTTP | Anthropic's MCP connector: its tool calls run where the approval gate cannot intercept them |
-| Structured outputs | Pydantic models through `output_config.format` (`client.messages.parse()`), `strict: true` on tools | Parsing JSON out of text |
+| MCP | The official `mcp` Python SDK, for our client and the `knowledge` server, on Streamable HTTP; GitHub's own server behind our GitHub gateway | Anthropic's MCP connector: its tool calls run where the approval gate cannot intercept them |
+| Structured outputs | Pydantic models through `output_config.format` (`client.messages.parse()`), `strict: true` on `knowledge`'s tool; a third-party tool is sent as accepted, because its schema does not meet `strict`'s rules and a rewrite would send what no admin accepted, and `validate_input` checks every input | Parsing JSON out of text |
 | Streaming | FastAPI's `fastapi.sse` and the generated client's SSE support | WebSockets: the stream is one-way. `sse-starlette`: FastAPI ships it |
 | Vectors | `pgvector` with `halfvec` and HNSW | A separate vector database |
 | Keyword search | Postgres full-text search and `pg_trgm`, fused by RRF in SQL | A search engine; a BM25 extension unless the retrieval evals justify its custom image |
@@ -82,8 +84,8 @@ calls.
   definition falls back to deny.
 - A source URL is `https://github.com/<owner>/<repo>` and nothing else, so ingestion cannot reach
   internal hosts.
-- No secret reaches a prompt, a `run_event` or a log. The GitHub token stays in its MCP server's
-  container.
+- No secret reaches a prompt, a `run_event` or a log. The GitHub token stays in the GitHub
+  gateway's process: GitHub's server takes it per request and stores it nowhere.
 - Assistant text and repository content render as sanitised Markdown, never raw HTML.
 - No tool executes code in v1.
 

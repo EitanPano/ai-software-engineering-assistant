@@ -18,8 +18,8 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] agent acts on GitHub through the GitHub MCP server
 - [ ] admin can manage MCP servers and tool policy
+- [ ] a tool accepted later reaches existing conversations
 - [ ] agent remembers long-term knowledge across conversations
 - [ ] agent returns schema-validated structured results
 - [ ] agent reads a file from the knowledge base
@@ -45,6 +45,8 @@ Example: `- [ ] user can sign in with email`
 - [ ] admin can re-index a connected source
 - [ ] admin can remove a source
 - [ ] connect is rate limited per admin
+- [ ] agent proposes a code change as a GitHub pull request
+- [ ] each user acts on GitHub with their own token
 
 ## DONE
 
@@ -61,3 +63,4 @@ Example: `- [ ] user can sign in with email`
 - [x] admin can measure retrieval quality with an eval run (2026-10-31, plan 009)
 - [x] agent searches the knowledge base through our MCP server (2026-11-01, plan 010)
 - [x] user approves sensitive tool calls (2026-11-01, plan 011)
+- [x] agent acts on GitHub through the GitHub MCP server (2026-11-01, plan 012)

@@ -15,6 +15,9 @@ export const MARKER = {
   research: '[[research]]',
   // The run fails with `refused`.
   refuse: '[[refuse]]',
+  // A `github__add_issue_comment` call at `ask` whose body runs past a screen, then "Tool done."
+  // (backend/tests/fake_anthropic.py, served by the fake GitHub MCP server).
+  githubComment: '[[github_comment]]',
 }
 export const TEXT = {
   first: 'The first part.',
@@ -26,6 +29,11 @@ export const TEXT = {
   // the fake asks for it with the arguments `{"text": "hi"}`.
   askTool: 'fixture__note',
   askArguments: '"text": "hi"',
+  // GitHub's comment tool, accepted from the fake GitHub MCP server; the arguments name the issue.
+  githubTool: 'github__add_issue_comment',
+  githubArguments: '"body"',
+  // The last line of the scripted 60-line body: the end of the arguments is on screen.
+  githubLastLine: 'Scripted comment, line 60 of 60.',
 }
 
 export function uniqueToken(): string {

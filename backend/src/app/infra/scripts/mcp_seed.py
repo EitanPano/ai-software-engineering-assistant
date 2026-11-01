@@ -1,8 +1,9 @@
-"""The MCP configuration `0009-mcp-server.sql` seeds (the `knowledge` server and its `search`
-policy), restored to exactly what the migration inserts. The e2e preparation and the test reset
-call it, so a stored listing, an edited policy or a deleted row never leaks into the next run, and
-the migration stays the one place the values are written: the statements are read from its text,
-not copied.
+"""The MCP configuration the migrations seed (`0009-mcp-server.sql`: the `knowledge` server and its
+`search` policy; `0011-github-mcp-server.sql`: the `github` server, disabled, and its seven
+policies), restored to exactly what they insert. The e2e preparation and the test reset call it, so
+a stored listing, a pin, an edited policy or a deleted row never leaks into the next run, and the
+migrations stay the one place the values are written: the statements are read from their text, not
+copied.
 """
 
 import re
@@ -13,6 +14,7 @@ from typing import Final
 from app.services.db import Executor, execute, fetch_one
 
 MIGRATION: Final = "0009-mcp-server.sql"
+MIGRATIONS: Final = (MIGRATION, "0011-github-mcp-server.sql")
 SEEDABLE_SUFFIXES: Final = ("_test", "_e2e")
 _SEEDS: Final = re.compile(
     r"^insert into (?:mcp_server|tool_policy)\b.*?;", re.DOTALL | re.MULTILINE
@@ -20,9 +22,12 @@ _SEEDS: Final = re.compile(
 
 
 def seed_statements() -> list[str]:
-    """The migration's `insert` statements for the two seeded tables, in file order."""
-    text = files("app.infra.migrations").joinpath(MIGRATION).read_text(encoding="utf-8")
-    return _SEEDS.findall(text)
+    """The migrations' `insert` statements for the two seeded tables, in file order."""
+    statements: list[str] = []
+    for migration in MIGRATIONS:
+        text = files("app.infra.migrations").joinpath(migration).read_text(encoding="utf-8")
+        statements.extend(_SEEDS.findall(text))
+    return statements
 
 
 class SeedDatabaseError(Exception):

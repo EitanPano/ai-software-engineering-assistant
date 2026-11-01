@@ -75,6 +75,8 @@ src/app/
   main.py             `app.main:app` with the infra lifespan; runs uvicorn; imported by nothing
   knowledge_main.py   `python -m app.knowledge_main`: the `knowledge` MCP server, `postgres` alone;
                       imported by nothing (see The agent)
+  github_gateway_main.py  `python -m app.github_gateway_main`: the GitHub gateway, no store; the
+                      only process that holds `GITHUB_MCP_PAT`; imported by nothing (see The agent)
   server.py           `create_app()` and `app`; builds the app, never listens, attaches no infra
   openapi.py          builds, shapes and caches the contract; `--write` emits openapi.json
   config/             env.py · constants.py · cors.py · routes.py
@@ -103,7 +105,7 @@ src/app/
     jobs/             one file per background job: session_cleanup
     subscribers/      one file per event reaction: send_welcome, execute_run, resume_run, index_source, execute_eval_run
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
-    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals), mcp_seed.py (restores the rows `0009-mcp-server.sql` seeds; the e2e preparation and the test reset call it. The one exception to "a script reaches a module only through its controller": it deletes from `tool_policy` and `mcp_server` through `services/db`, so it refuses unless `current_database()` ends in `_test` or `_e2e`)
+    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals), accept_mcp_server.py (an admin pins a third-party server's tools, see The agent), mcp_seed.py (restores the rows `0009-mcp-server.sql` and `0011-github-mcp-server.sql` seed; the e2e preparation and the test reset call it. The one exception to "a script reaches a module only through its controller": it deletes from `tool_policy` and `mcp_server` through `services/db`, so it refuses unless `current_database()` ends in `_test` or `_e2e`)
     eval_cases/       the labelled case files the seed reads (click-8.5.0.json)
 tests/                mirrors src/app/ (a package throughout, so two test_x.py cannot clash)
 openapi.json          the committed contract, written by the `contract` command
@@ -285,6 +287,7 @@ or infra file joins the list.
 | `only the parse worker imports tree-sitter` | `tree_sitter` and its grammars are imported by `services/parse_worker.py` alone |
 | `only services mcp imports the MCP SDK` | `mcp` and `mcp_types` are imported by `services/mcp.py` alone (the parse worker's list also forbids it) |
 | `the knowledge entry stays an entry` | `knowledge_main.py` imports no `main`, `server`, middleware, routes, bus, scheduler, cache store or module data layer; `app.main` and `app.knowledge_main` share the top layer and the entry contracts |
+| `the github gateway entry stays an entry` | `github_gateway_main.py` imports no `main`, `server`, middleware, routes, bus, scheduler, store or module; it shares the top layer and the entry contracts with the other two entries |
 
 Module privacy is one point stricter than a type-aware linter: import-linter cannot tell a
 type-only import, so a module's `routes`, `service` and `model` never import another module's
@@ -409,18 +412,57 @@ changes only by plan.
   discover_tools` lists every enabled server concurrently (one session per list, in a task of its
   own, `MCP.list_seconds`), keeps each good listing on its `mcp_server` row and writes one
   `mcp_server_unavailable` event for each server that did not answer, whose last good listing is
-  offered instead. The model sees `<server>__<tool>`, strict, sorted. `knowledge`'s URL and token
-  are `KNOWLEDGE_MCP_URL` and `KNOWLEDGE_MCP_TOKEN`, never a row's (its `url` is null); any other
-  row has a `url` and is sent no token. A call runs policy (`tool_policy`, read at each call, so a
-  stored definition never outranks it), then the schema of the definition the conversation was
-  offered, then the server (`MCP.call_seconds`), and is recorded as a `tool_call` (arguments,
-  result, status; `mcp_server_id` and `tool_name` name the server row that owns the name (enabled or not) and the tool's own name; with no such row the id is null and `tool_name` is the model's name). A run spends at
-  most `AGENT_TOOL_CALLS_PER_RUN` calls, counted from its `tool_call` rows before the turn's calls
-  start; the rest are a fixed `is_error` result and no server call. An input holding NUL fails the
-  run (JSONB cannot store it) before anything is started.
+  offered instead. The model sees `<server>__<tool>`, sorted; `strict` only on `knowledge`'s (the
+  GitHub definitions are not closed objects and use `minimum` and `minLength`, so `strict` would be
+  a 400; `validate_input` checks every input against the full schema instead). `knowledge`'s URL
+  and token are `KNOWLEDGE_MCP_URL` and `KNOWLEDGE_MCP_TOKEN`, never a row's (its `url` is null);
+  `github`'s are `GITHUB_MCP_URL` and `GITHUB_MCP_TOKEN` (null `url`, the token optional); any
+  other row has a `url` and is sent no token. A call runs policy (`tool_policy`, read at each call,
+  so a stored definition never outranks it), then the pin (`tool.pin_holds`, third party only),
+  then the schema of the definition the conversation was offered, then the server
+  (`MCP.call_seconds`), and is recorded as a `tool_call` (arguments, result, status;
+  `mcp_server_id` and `tool_name` name the server row that owns the name (enabled or not) and the
+  tool's own name; with no such row the id is null and `tool_name` is the model's name). A run
+  spends at most `AGENT_TOOL_CALLS_PER_RUN` calls, counted from its `tool_call` rows before the
+  turn's calls start; the rest are a fixed `is_error` result and no server call. An input holding
+  NUL fails the run (JSONB cannot store it) before anything is started.
+- The pin. `mcp_server.pinned_tool_definition` is what an admin accepted; `tool_definition` stays
+  the last listing. Every server but `knowledge` offers only pinned tools whose live listing equals
+  the pin (name, description, schema), the pin itself while the server is down, and nothing while
+  the pin is null, so the model reads only accepted text. A changed definition denies at three
+  points: discovery stops offering it; `_clear` in `api/agent/controller.py` (`tool.pin_holds`,
+  between policy and schema, so a pause and `resume_run` both pass it) denies before any `ask`;
+  and `mcp.call_tool(..., pinned=)` lists again in the call's own session and raises
+  `ToolDefinitionChanged` (a change during a long approval). That listing is also what makes the
+  client send a tool's `Mcp-Param-*` headers (`x-mcp-header`; protocol `2026-07-28`). Accept with
+  `uv run --env-file .env python -m app.infra.scripts.accept_mcp_server <name>` (in Compose:
+  `docker compose --env-file backend/.env.github --profile app --profile github run --rm
+  backend-migrate python -m app.infra.scripts.accept_mcp_server github`): it prints the live
+  listing whole, its digest and what changed from the pin (definitions compare as canonical JSON,
+  so `0` and `false` differ), takes an exact `yes`, stores what it printed and enables the row;
+  anything else writes nothing and exits 1, as does a tool name outside `[A-Za-z0-9_-]+` or listed
+  twice (refused before anything of the listing is printed). `0011` seeds `github` disabled with
+  its seven `tool_policy` rows (reads `allow`, `issue_write` and `add_issue_comment` `ask`), so
+  nothing is offered before an accept and a policy is never edited by hand. A conversation started
+  before an accept or a re-pin keeps its frozen tools: start a new one. A result passes `MCP` limits as text:
+  embedded text joins the result, a blob stays out, and a cut output ends with a fixed note.
+- The GitHub gateway (`app.github_gateway_main`, the `github-gateway` Compose service in profile
+  `github`, port 8002, no published port; by hand `uv run poe github-gateway`). `github-mcp-server
+  http` has no static token (it reads a PAT from each request's `Authorization`), so a plain service
+  would make the API send the PAT. The gateway takes `GITHUB_MCP_TOKEN` (constant-time bearer check,
+  else 401), adds `GITHUB_MCP_PAT` and forwards `POST /mcp` to `GITHUB_MCP_UPSTREAM_URL` (the
+  `github-mcp` service, pinned by digest, limited by `GITHUB_TOOLS`, lockdown on), streaming the
+  answer; other methods 405; it passes only `accept`, `content-type` and `mcp-*` headers, so
+  `x-mcp-*` cannot widen what the server offers; it logs no header. `GITHUB_MCP_PAT` is read in
+  that process alone (`APP_PROCESS=github_gateway`; any other process refuses to boot with it),
+  locally from the git-ignored `backend/.env.github` (`uv run --env-file .env.github poe
+  github-gateway`), never `backend/.env`. `tests/live_github.py` (free, no model turn, in no gate)
+  is the person's check of the real listing, one real file and `count_tokens`: `uv run --env-file
+  .env python -m tests.live_github` against a gateway started by hand. Neither HTTP client of
+  the stack trusts the environment's proxies (`trust_env` off), so the token never goes to one.
 - Approvals. A call whose policy is `ask` and that passes the other gates (an enabled server, an
-  offered tool, a valid input) is held: the other calls of the turn run at once, then `pause_run`
-  (`api/run/controller.py`) commits in one transaction a `tool_call` row at `awaiting_approval`
+  offered tool, the pin, a valid input) is held: the other calls of the turn run at once, then
+  `pause_run` (`api/run/controller.py`) commits in one transaction a `tool_call` row at `awaiting_approval`
   (`result` `''`), an `approval` row with `arguments_digest` and an `approval_requested` event for
   each held call, the run's `awaiting_approval` status and `run.pending_turn` (the assistant turn
   whole and the results already known; never `message`, which must not hold an unanswered
@@ -468,8 +510,13 @@ changes only by plan.
   not connected in a test). Across processes, where `use_transport` cannot reach, `fixture` is a
   one-tool server (`note { text }`, `tests/fake_note.py`) served at `/mcp` by the
   `python -m tests.fake_anthropic` process; `python -m tests.seed_ask_tool` (e2e database only)
-  and `seed_ask_tool.seed` write its row and its `ask` policy, after `restore_seed`, which deletes
-  it. `tests/test_approval_restart.py` kills a real API process during a pause.
+  and `seed_ask_tool.seed` write its row, its pin and its `ask` policy, after `restore_seed`, which
+  deletes it, and pin and enable `github` to the seven recorded tools. `lab` and `fixture` are
+  third party, so `register_lab` and the seed write a pin. `tests/fake_github_mcp.py` is a scripted
+  `github-mcp-server` on the real transport (enforces its bearer and `x-mcp-header`, returns a file
+  as an embedded resource) over `tests/github_tools.json`, the seven definitions recorded from
+  `v2.0.3`; it runs in process (`Servers.github`, `accept_github`) and at `/github/mcp` in the
+  `python -m tests.fake_anthropic` process, and `[[github_comment]]` scripts the comment journey. `tests/test_approval_restart.py` kills a real API process during a pause.
   `tests/knowledge_support.py` calls `knowledge` directly. The seeded `mcp_server` and
   `tool_policy` rows survive `reset_store()` (restored from the migration's own statements by
   `infra/scripts/mcp_seed.py`) and the e2e preparation.

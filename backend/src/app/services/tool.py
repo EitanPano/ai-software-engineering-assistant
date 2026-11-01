@@ -23,7 +23,9 @@ from jsonschema.validators import validator_for
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
-from app.models.mcp_server.type import ListedTool
+from app.models.mcp_server.constants import KNOWLEDGE_SERVER
+from app.models.mcp_server.interface import McpServerRecord
+from app.models.mcp_server.type import ListedTool, canonical, same_definition
 from app.models.tool_policy.enums import PolicyEffect
 
 type Decision = Literal["allow", "ask", "deny"]
@@ -68,14 +70,20 @@ def split_name(name: str) -> tuple[str, str] | None:
 
 
 def _definition(server: str, listed: ListedTool) -> ToolDefinition:
-    return {
+    definition: ToolDefinition = {
         "name": model_name(server, listed.name),
         "description": listed.description,
         # A copy: the definition is stored and sent, and must not alias a listing.
         "input_schema": _copy(listed.input_schema),
-        "strict": True,
-        "eager_input_streaming": True,
     }
+    if server == KNOWLEDGE_SERVER:
+        # `strict` needs `additionalProperties: false` on every object and refuses `minimum`,
+        # `maximum` and `minLength`. We wrote `knowledge`'s schema to fit; a third party's does not,
+        # and rewriting it would send what no admin accepted. `validate_input` checks every input
+        # against the full schema either way.
+        definition["strict"] = True
+    definition["eager_input_streaming"] = True
+    return definition
 
 
 def _copy(value: dict[str, object]) -> dict[str, object]:
@@ -92,6 +100,63 @@ def definitions(listings: Mapping[str, Sequence[ListedTool]]) -> list[ToolDefini
         _definition(server, listed) for server, tools in listings.items() for listed in tools
     ]
     return sorted(offered, key=lambda definition: str(definition["name"]))
+
+
+def pin_holds(server: McpServerRecord, tool_name: str, offered: Mapping[str, object]) -> bool:
+    """Whether a call may run against what an admin accepted. `knowledge` is ours and is not pinned.
+    Any other server needs the tool in its pin, and the last listing (if there is one) and the
+    definition the conversation was offered must equal the pin by description and schema: a changed
+    listing, a tool gone from it, or a conversation frozen before a re-pin all deny. A server never
+    listed holds on the offer alone, because `call_tool` lists again in the call's own session."""
+    if server.name == KNOWLEDGE_SERVER:
+        return True
+    pinned = next((t for t in server.pinned_tool_definition or [] if t.name == tool_name), None)
+    if pinned is None:
+        return False
+    if canonical(pinned.name, offered.get("description"), offered.get("input_schema")) != canonical(
+        pinned.name, pinned.description, pinned.input_schema
+    ):
+        return False
+    if server.tool_definition is None:
+        return True
+    return any(t.name == pinned.name and same_definition(t, pinned) for t in server.tool_definition)
+
+
+def listing_digest(tools: Sequence[ListedTool]) -> str:
+    """The SHA-256 of a listing as 64 hex characters, canonical and sorted by name, so an admin can
+    compare what they read with what is stored."""
+    document = [
+        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+        for t in sorted(tools, key=lambda t: t.name)
+    ]
+    return arguments_digest({"tools": document})
+
+
+def _shown(name: str) -> str:
+    """A server-chosen name as JSON escapes it (no quotes): a control character becomes `\\x1b`
+    text and cannot move an admin's cursor."""
+    return json.dumps(name)[1:-1]
+
+
+def listing_changes(pinned: Sequence[ListedTool] | None, live: Sequence[ListedTool]) -> list[str]:
+    """What differs between the pin and the live listing, one line each: `added: x`, `removed: x`,
+    `changed: x`, by tool name, in name order. Empty when they are equal."""
+    before: dict[str, set[str]] = {}
+    for t in pinned or []:
+        before.setdefault(t.name, set()).add(canonical(t.name, t.description, t.input_schema))
+    after: dict[str, set[str]] = {}
+    for t in live:
+        after.setdefault(t.name, set()).add(canonical(t.name, t.description, t.input_schema))
+    # A name is rendered as JSON: a server chooses it, and a control character in it must not reach
+    # an admin's terminal. A name listed twice differs from the pin unless every copy matches.
+    lines = [f"added: {_shown(name)}" for name in sorted(after.keys() - before.keys())]
+    lines += [f"removed: {_shown(name)}" for name in sorted(before.keys() - after.keys())]
+    lines += [
+        f"changed: {_shown(name)}"
+        for name in sorted(before.keys() & after.keys())
+        if before[name] != after[name]
+    ]
+    return lines
 
 
 def _field(error: ValidationError, schema_keys: set[str], given: set[str]) -> list[str]:

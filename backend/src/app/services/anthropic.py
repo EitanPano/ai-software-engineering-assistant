@@ -121,6 +121,20 @@ def _messages(history: Sequence[HistoryTurn]) -> list[BetaMessageParam]:
     return cast("list[BetaMessageParam]", turns)
 
 
+async def count_tokens(tools: Sequence[dict[str, object]], *, system: str) -> int:
+    """The input tokens of `system` and `tools` alone, from the free token-counting endpoint (no
+    model turn is billed). `tests/live_github.py` uses it to see whether the API accepts a tool
+    list as built. A rejected request propagates as the SDK's error."""
+    counted = await _client().beta.messages.count_tokens(
+        model=env.llm_model,
+        system=system,
+        messages=[{"role": "user", "content": "x"}],
+        tools=cast("list[BetaToolUnionParam]", list(tools)),
+        betas=[FALLBACK_BETA, BINDING_BETA],
+    )
+    return counted.input_tokens
+
+
 async def stream_turn(
     history: Sequence[HistoryTurn],
     tools: Sequence[dict[str, object]],

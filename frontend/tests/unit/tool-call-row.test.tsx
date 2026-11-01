@@ -77,13 +77,13 @@ describe('ToolCallRow waiting for approval', () => {
     expect(screen.getByRole('button', { name: 'Approve call' })).toBeInTheDocument()
   })
 
-  it('shows the whole arguments, pretty-printed, in a labelled focusable scroll box', () => {
+  it('shows the whole arguments, pretty-printed, in a labelled group with no cap and no scroll', () => {
     const text = 'x'.repeat(5000)
     render(<ToolCallRow call={waiting({ text, nested: { n: 1 } })} />)
 
     const box = screen.getByRole('group', { name: 'Arguments of knowledge__search' })
-    expect(box).toHaveAttribute('tabindex', '0')
-    expect(box).toHaveClass('overflow-auto')
+    expect(box).not.toHaveAttribute('tabindex')
+    expect(box.className).not.toMatch(/overflow|max-h/)
     expect(box.textContent).toContain(text)
     expect(box.textContent).toContain('\n  "nested": {\n    "n": 1\n  }')
   })

@@ -26,6 +26,9 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | arguments digest | SHA-256 of a held call's canonical stored arguments, echoed by the decision so it binds to what the person was shown | `approval.arguments_digest`, field `argumentsDigest` |
 | tool policy | The rule that allows, asks about or denies a tool | table `tool_policy`, route `/api/tool-policy`, module `tool_policy` |
 | MCP server | A Model Context Protocol server the agent's tools come from | table `mcp_server`, route `/api/mcp-server`, module `mcp_server` |
+| pin | The tool definitions of a third-party MCP server that an admin accepted; only pinned definitions are offered, and a changed one is denied | column `mcp_server.pinned_tool_definition` |
+| accept | An admin's act of pinning a server's live listing after reading it, which also enables the server | command `accept_mcp_server` |
+| GitHub gateway | Our process in front of GitHub's MCP server: the only one that holds the GitHub token, and it adds that token to each forwarded request | entry `app.github_gateway_main`, Compose service `github-gateway` |
 | knowledge base | Every chunk of every `ready` source, searched by a signed-in person and by the agent | route `/api/search`, MCP server `knowledge` |
 | source | A connected GitHub repository at a ref | table `source`, route `/api/source`, module `source` |
 | document | One file from a source | table `document` |

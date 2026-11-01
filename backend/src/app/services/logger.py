@@ -81,6 +81,18 @@ _STDOUT_NAME: Final = "app.stdout"
 _STDERR_NAME: Final = "app.stderr"
 
 
+_CONTROL: Final = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+class _SafeFormatter(logging.Formatter):
+    """The bare message, with every control character but newline and tab made visible. A library
+    logs strings a remote server chose (the MCP SDK's unknown SSE event name), and a raw escape
+    sequence would reach an admin's terminal."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return _CONTROL.sub(lambda match: f"\\x{ord(match.group()):02x}", super().format(record))
+
+
 def configure_logging() -> None:
     """Configure the root logger: info to stdout, warning and above to stderr, message only.
 
@@ -91,7 +103,7 @@ def configure_logging() -> None:
     root = logging.getLogger()
     for handler in [h for h in root.handlers if h.name in {_STDOUT_NAME, _STDERR_NAME}]:
         root.removeHandler(handler)
-    formatter = logging.Formatter("%(message)s")
+    formatter = _SafeFormatter("%(message)s")
     stdout = logging.StreamHandler(sys.stdout)
     stdout.set_name(_STDOUT_NAME)
     stdout.addFilter(lambda record: record.levelno < logging.WARNING)

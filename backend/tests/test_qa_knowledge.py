@@ -349,9 +349,17 @@ class TestSeededRows:
             "select p.tool_name, p.effect as status, s.name as result from tool_policy p "
             "join mcp_server s on s.id = p.mcp_server_id",
         )
-        assert [(r.tool_name, r.status, r.result) for r in rows] == [
-            ("search", "allow", "knowledge")
+        assert [(r.tool_name, r.status) for r in rows if r.result == "knowledge"] == [
+            ("search", "allow")
         ]
+        # 0011 seeds the seven GitHub tools beside it: reads allow, the two writes ask.
+        github = {r.tool_name: r.status for r in rows if r.result == "github"}
+        assert len(github) == 7
+        assert {name for name, effect in github.items() if effect == "ask"} == {
+            "issue_write",
+            "add_issue_comment",
+        }
+        assert {r.result for r in rows} == {"knowledge", "github"}
         enabled = await fetch_all(
             _Row,
             "select name as tool_name, 'x' as status, coalesce(url, '') as result "

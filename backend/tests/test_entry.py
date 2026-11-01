@@ -157,6 +157,216 @@ class TestKnowledgeEntry:
         assert "reload" not in knowledge_options()
 
 
+GATEWAY_SOURCE = {
+    "APP_PROCESS": "github_gateway",
+    "GITHUB_MCP_PAT": f"{LONG_VALUE}-pat",
+    "GITHUB_MCP_TOKEN": f"{LONG_VALUE}-gateway",
+}
+GATEWAY_PRODUCTION = {"APP_ENV": "production", **GATEWAY_SOURCE}
+
+
+class TestGatewayEntry:
+    """`app.github_gateway_main` copies `main.py`'s uvicorn flags like `knowledge_main` does."""
+
+    def test_shares_every_flag_with_the_api_entry(self) -> None:
+        from app.github_gateway_main import uvicorn_options as gateway_options
+
+        api = dict(uvicorn_options(reload=False))
+        gateway = dict(gateway_options())
+
+        assert api.keys() == gateway.keys()
+        for name in api.keys() - {"port", "host"}:
+            assert gateway[name] == api[name], name
+
+    def test_binds_loopback_outside_production_and_every_interface_in_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.config.env import env
+        from app.github_gateway_main import uvicorn_options as gateway_options
+
+        for app_env, host in (
+            ("development", "127.0.0.1"),
+            ("test", "127.0.0.1"),
+            ("production", "0.0.0.0"),  # noqa: S104 the container's interface
+        ):
+            monkeypatch.setattr(
+                "app.github_gateway_main.env", env.model_copy(update={"app_env": app_env})
+            )
+            assert gateway_options()["host"] == host, app_env
+
+    def test_the_poe_task_serves_on_port_8002_and_has_no_reload(self) -> None:
+        import tomllib
+
+        from app.github_gateway_main import uvicorn_options as gateway_options
+
+        tasks = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))["tool"]["poe"][
+            "tasks"
+        ]
+        task = tasks["github-gateway"]
+
+        assert task["cmd"] == "python -m app.github_gateway_main"
+        assert task["env"]["PORT"] == "8002"
+        assert "reload" not in gateway_options()
+
+    def test_creates_the_gateway_from_its_two_secrets(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.github_gateway_main import create_app
+        from app.services.mcp import McpApp
+
+        monkeypatch.setattr("app.github_gateway_main.env", load_env(GATEWAY_SOURCE).env)
+
+        assert isinstance(create_app(), McpApp)
+
+    def test_refuses_to_create_the_gateway_without_the_pat(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.config.env import env
+        from app.github_gateway_main import create_app
+
+        monkeypatch.setattr(
+            "app.github_gateway_main.env", env.model_copy(update={"github_mcp_pat": None})
+        )
+
+        with pytest.raises(RuntimeError, match="GITHUB_MCP_PAT"):
+            create_app()
+
+    def test_the_default_url_of_the_api_names_the_gateway_port(self) -> None:
+        from urllib.parse import urlparse
+
+        assert urlparse(load_env({}).env.github_mcp_url).port == 8002
+
+
+class TestGatewayEnv:
+    def test_the_gateway_needs_the_pat_and_the_token_in_every_environment(self) -> None:
+        for source in (GATEWAY_SOURCE, GATEWAY_PRODUCTION):
+            loaded = load_env(source)
+            assert loaded.env.app_process == "github_gateway"
+            assert loaded.env.github_mcp_pat == GATEWAY_SOURCE["GITHUB_MCP_PAT"]
+            assert loaded.env.github_mcp_token == GATEWAY_SOURCE["GITHUB_MCP_TOKEN"]
+            assert loaded.defaulted_secrets == []
+
+    @pytest.mark.parametrize("missing", ["GITHUB_MCP_PAT", "GITHUB_MCP_TOKEN"])
+    @pytest.mark.parametrize("environment", ["development", "production"])
+    def test_the_gateway_has_no_development_default_for_either_secret(
+        self, missing: str, environment: str
+    ) -> None:
+        source = {k: v for k, v in GATEWAY_SOURCE.items() if k != missing}
+
+        with pytest.raises(EnvError, match=missing):
+            load_env({**source, "APP_ENV": environment})
+
+    def test_the_gateway_reads_only_its_secrets_and_replaces_the_others(self) -> None:
+        leaked = {
+            **GATEWAY_SOURCE,
+            "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4",
+            "VOYAGE_API_KEY": f"{LONG_VALUE}-5",
+            "KNOWLEDGE_MCP_TOKEN": f"{LONG_VALUE}-6",
+            "DATABASE_URL": PRODUCTION["DATABASE_URL"],
+        }
+        env = load_env(leaked).env
+
+        assert env.anthropic_api_key != f"{LONG_VALUE}-4"
+        assert env.voyage_api_key != f"{LONG_VALUE}-5"
+        assert env.knowledge_mcp_token != f"{LONG_VALUE}-6"
+        assert env.database_url != PRODUCTION["DATABASE_URL"]
+
+    def test_the_gateway_reads_the_upstream_with_a_local_default(self) -> None:
+        assert load_env(GATEWAY_SOURCE).env.github_mcp_upstream_url == "http://127.0.0.1:8082/"
+        custom = {**GATEWAY_SOURCE, "GITHUB_MCP_UPSTREAM_URL": "http://github-mcp:8082/"}
+        assert load_env(custom).env.github_mcp_upstream_url == "http://github-mcp:8082/"
+
+    @pytest.mark.parametrize("environment", ["development", "test", "production"])
+    @pytest.mark.parametrize("name", ["GITHUB_MCP_TOKEN", "GITHUB_MCP_PAT"])
+    @pytest.mark.parametrize(
+        "placeholder",
+        [
+            f"dev-only-{LONG_VALUE}",
+            f"change-me-{LONG_VALUE}",
+            "<a random string of at least 32 characters>",
+        ],
+    )
+    def test_the_gateway_refuses_a_placeholder_in_every_environment(
+        self, environment: str, name: str, placeholder: str
+    ) -> None:
+        source = {**GATEWAY_SOURCE, "APP_ENV": environment, name: placeholder}
+
+        with pytest.raises(EnvError, match=f"{name}: is a placeholder") as raised:
+            load_env(source)
+
+        assert placeholder not in str(raised.value)
+
+    def test_the_gateway_refuses_the_pat_as_its_own_bearer_token(self) -> None:
+        shared = f"{LONG_VALUE}-one-value-for-both"
+        source = {**GATEWAY_SOURCE, "GITHUB_MCP_PAT": shared, "GITHUB_MCP_TOKEN": shared}
+
+        with pytest.raises(EnvError, match="GITHUB_MCP_TOKEN: must differ") as raised:
+            load_env(source)
+
+        assert shared not in str(raised.value)
+
+    @pytest.mark.parametrize("process", ["backend", "github_gateway"])
+    @pytest.mark.parametrize("prefix", ["ghp_", "github_pat_", "gho_", "ghu_", "ghs_"])
+    def test_a_bearer_token_shaped_like_a_github_token_is_refused_in_any_process(
+        self, process: str, prefix: str
+    ) -> None:
+        token = f"{prefix}{LONG_VALUE}"
+        source = {**GATEWAY_SOURCE, "APP_PROCESS": process, "GITHUB_MCP_TOKEN": token}
+        if process == "backend":
+            del source["GITHUB_MCP_PAT"]
+
+        with pytest.raises(EnvError, match="GITHUB_MCP_TOKEN") as raised:
+            load_env(source)
+
+        assert token not in str(raised.value)
+
+    @pytest.mark.parametrize("process", ["backend", "knowledge"])
+    @pytest.mark.parametrize("environment", ["development", "production"])
+    def test_any_other_process_refuses_to_boot_with_the_pat_and_names_no_value(
+        self, process: str, environment: str
+    ) -> None:
+        base = PRODUCTION if environment == "production" else {}
+        source = {**base, "APP_PROCESS": process, "GITHUB_MCP_PAT": "ghp_a-secret-pat-value"}
+        if process == "knowledge":
+            source |= KNOWLEDGE_PRODUCTION if environment == "production" else {}
+
+        with pytest.raises(EnvError) as raised:
+            load_env(source)
+
+        assert "GITHUB_MCP_PAT" in str(raised.value)
+        assert "ghp_a-secret-pat-value" not in str(raised.value)
+
+    def test_the_pat_is_refused_when_no_process_is_named(self) -> None:
+        with pytest.raises(EnvError, match="GITHUB_MCP_PAT"):
+            load_env({"GITHUB_MCP_PAT": "ghp_a-secret-pat-value"})
+
+    def test_a_blank_pat_is_unset(self) -> None:
+        assert load_env({"GITHUB_MCP_PAT": " "}).env.github_mcp_token is None
+
+    def test_the_api_reads_the_github_address_and_an_optional_token(self) -> None:
+        loaded = load_env({}).env
+        assert loaded.github_mcp_token is None
+        assert loaded.github_mcp_url == "http://127.0.0.1:8002/mcp"
+
+        configured = load_env(
+            {
+                "GITHUB_MCP_URL": "http://github-gateway:8002/mcp",
+                "GITHUB_MCP_TOKEN": f"{LONG_VALUE}-gateway",
+            }
+        ).env
+        assert configured.github_mcp_url == "http://github-gateway:8002/mcp"
+        assert configured.github_mcp_token == f"{LONG_VALUE}-gateway"
+        assert (
+            load_env({"GITHUB_MCP_URL": " ", "GITHUB_MCP_TOKEN": ""}).env.github_mcp_token is None
+        )
+
+    def test_the_api_refuses_a_placeholder_gateway_token_in_production(self) -> None:
+        source = {**PRODUCTION, "GITHUB_MCP_TOKEN": f"change-me-{LONG_VALUE}"}
+
+        with pytest.raises(EnvError, match="GITHUB_MCP_TOKEN: is a placeholder"):
+            load_env(source)
+
+
 class TestLoadEnv:
     """`load_env` takes an explicit source, so these cases never read the real environment."""
 

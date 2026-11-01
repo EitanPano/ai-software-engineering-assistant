@@ -355,6 +355,7 @@ class TestProviderResolutionAtBoot:
                 "ANTHROPIC_API_KEY": "a-production-anthropic-key-of-some-length",
                 "VOYAGE_API_KEY": "a-production-voyage-key-of-some-length",
                 "KNOWLEDGE_MCP_TOKEN": "d" * 40,
+                "GITHUB_MCP_TOKEN": "e" * 40,
                 "APP_PROCESS": "backend",
             }
         )
