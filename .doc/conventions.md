@@ -25,6 +25,11 @@ provider by decision (2026-10-31), not by default: a local model would drop one 
 retrieval quality that nothing has measured yet. When two designs both work and neither loses
 something this file requires, take the one with fewer things to install and fewer keys to hold.
 
+The stack is built for local use (2026-11-01): Compose publishes the app and the database on
+loopback, and the app connects as the bundled `app` superuser, so a clone runs with no setup. This
+narrows the `deployment` skill's `single` mode, whose port is on every interface. A public host is
+the operator's to harden, and the root `README.md` says how.
+
 ## Tooling
 
 Decided at the bootstrap. A plan may change a row by saying why; a dependency not listed here

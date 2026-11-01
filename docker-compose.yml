@@ -40,9 +40,10 @@ services:
       # backend does not wait for the server: an outage of it never stops the API.
       KNOWLEDGE_MCP_URL: http://knowledge:8001/mcp
       KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
-    # Single: the server is the public edge, so it publishes on every interface. With TRUST_PROXY
-    # false no caller can choose its own client IP through X-Forwarded-For.
-    ports: [ "8000:8000" ]
+    # Single, on loopback: the stack is built for local use and agent runs spend the owner's key, so
+    # nothing else on the network reaches it. With TRUST_PROXY false no caller can choose its own
+    # client IP through X-Forwarded-For. A public host changes this line (README › Usage).
+    ports: [ "127.0.0.1:8000:8000" ]
     profiles: [ "app" ]
     # Without this, `up --wait` returns when the container starts, before uvicorn binds the port:
     # it binds only after the lifespan connects every dependency. Every probe is a request-log

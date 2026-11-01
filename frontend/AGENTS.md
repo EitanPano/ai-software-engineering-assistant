@@ -465,7 +465,7 @@ tests.seed_ask_tool`, then `app.main`: `e2e-db`'s restore deletes the last run's
   `script-src 'self'`, so an inline script would be blocked.
 - **Two modes**, chosen at generation (`--deploy`).
   - `single` (default): one container. The server serves `dist/` and `/api` on its own port
-    (published on every interface), so the page is on the server's port and `5173` is dev-only.
+    (published on loopback only), so the page is on the server's port and `5173` is dev-only.
   - `split`: two containers. This package's nginx serves the files on `5173` (published on every
     interface, the public edge) and proxies `/api/` to the server, which is published on
     loopback only.

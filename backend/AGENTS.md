@@ -1044,7 +1044,8 @@ the `Dockerfile` and the Compose fragment differ, through the lines named below,
 - **`single`.** One image holds the API and the SPA. The `Dockerfile` copies the SPA from the
   `spa` build context (the frontend's `dist` target) and sets `STATIC_DIR`. The Compose service adds `build.additional_contexts: { spa: "service:<frontend dir>" }`, which
   copies from the frontend's build-only service (`scale: 0`, no container), and publishes
-  `8000:8000` on every interface: the server is the public edge. `TRUST_PROXY` defaults
+  `127.0.0.1:8000:8000`, loopback only, because the stack is built for local use
+  (`.doc/conventions.md › Distribution`). `TRUST_PROXY` defaults
   to `false`, so no caller can choose its own client IP through `X-Forwarded-For`. This needs
   Docker Compose 2.35.0 or later; an older client fails with a message that does not name the cause.
   The `spa` context exists only in Compose, so a plain `docker build` of this package fails in
@@ -1092,9 +1093,10 @@ environment:
   # address. Behind a production edge set the hop count (a PaaS edge is usually 1).
   TRUST_PROXY: ${TRUST_PROXY:-false}
 # (the other service keys stay)
-# Single: the server is the public edge, so it publishes on every interface. With TRUST_PROXY
-# false no caller can choose its own client IP through X-Forwarded-For.
-ports: ["8000:8000"]
+# Single, on loopback: the stack is built for local use and agent runs spend the owner's key, so
+# nothing else on the network reaches it. With TRUST_PROXY false no caller can choose its own
+# client IP through X-Forwarded-For. A public host changes this line (README › Usage).
+ports: ["127.0.0.1:8000:8000"]
 ```
 
 Compose, `split` (replaces the `single` lines above):

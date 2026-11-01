@@ -115,6 +115,12 @@ To run the whole stack with Docker Compose (the app is then at http://localhost:
 docker compose --profile app up --build
 ```
 
+This stack is built to run on your own machine. Compose publishes the app and the database on
+`127.0.0.1` only, the bundled database uses `app` / `app` as a Postgres superuser, and agent runs
+spend your Anthropic key with no spend cap yet. To host it publicly, set your own database password,
+connect with a non-superuser role, change the app's `ports` line in `docker-compose.yml`, and set
+`TRUST_PROXY` to your proxy hop count if a proxy sits in front of it.
+
 ## Configuration
 
 <!-- configuration:start -->
