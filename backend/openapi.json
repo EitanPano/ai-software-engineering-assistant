@@ -3181,6 +3181,35 @@
             "properties": {
               "type": {
                 "type": "string",
+                "const": "mcp_server_unavailable",
+                "title": "Type",
+                "default": "mcp_server_unavailable"
+              },
+              "sequence": {
+                "type": "integer",
+                "title": "Sequence"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "name": {
+                "type": "string",
+                "title": "Name"
+              }
+            },
+            "type": "object",
+            "required": [
+              "sequence",
+              "createdAt",
+              "name"
+            ],
+            "title": "McpServerUnavailableEvent"
+          },
+          {
+            "properties": {
+              "type": {
+                "type": "string",
                 "const": "run_finished",
                 "title": "Type",
                 "default": "run_finished"

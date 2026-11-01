@@ -65,6 +65,13 @@ class ToolCallFinishedEvent(ResponseModel):
     output: str
 
 
+class McpServerUnavailableEvent(ResponseModel):
+    type: Literal["mcp_server_unavailable"] = "mcp_server_unavailable"
+    sequence: int
+    created_at: Timestamp
+    name: str
+
+
 class RunFinishedEvent(ResponseModel):
     type: Literal["run_finished"] = "run_finished"
     sequence: int
@@ -80,6 +87,7 @@ class RunEvent(
             | TextDeltaEvent
             | ToolCallStartedEvent
             | ToolCallFinishedEvent
+            | McpServerUnavailableEvent
             | RunFinishedEvent,
             Field(discriminator="type"),
         ]

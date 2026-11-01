@@ -27,8 +27,8 @@ from app.api.run.schema import (
 )
 from app.config.constants import AGENT_POLL_MS, AGENT_STREAM_MAX_SECONDS, EVENT_BATCH_LIMIT
 from app.middleware.auth import require_caller
-from app.models.run.enums import RunErrorCode, RunEventType, RunStatus
-from app.models.run.interface import RunEventRecord, RunRecord
+from app.models.run.enums import RunErrorCode, RunEventType, RunStatus, ToolCallStatus
+from app.models.run.interface import RunEventRecord, RunRecord, ToolCallRecord
 from app.services.logger import log
 from app.services.utils import clock
 from app.services.utils.error import AppError
@@ -137,6 +137,38 @@ async def append_run_event(
     """Appends one event through the run's writer."""
     async with _writer(run_id):
         return await _append(run_id, event_type, payload)
+
+
+async def record_tool_call(
+    *,
+    run_id: str,
+    tool_use_id: str,
+    mcp_server_id: str | None,
+    tool_name: str,
+    arguments: dict[str, object],
+    result: str,
+    status: ToolCallStatus,
+) -> None:
+    """System operation: stores one tool call of a run with its arguments, the text the model got
+    back and how it ended. The loop counts these rows to hold a run's budget."""
+    await service.insert_tool_call(
+        ToolCallRecord(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            tool_use_id=tool_use_id,
+            mcp_server_id=mcp_server_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            result=result,
+            status=status,
+            created_at=clock.now(),
+        )
+    )
+
+
+async def count_tool_calls(run_id: str) -> int:
+    """System operation: how many tool calls the run has recorded, denied ones included."""
+    return await service.count_tool_calls(run_id)
 
 
 async def start_run(run_id: str) -> bool:

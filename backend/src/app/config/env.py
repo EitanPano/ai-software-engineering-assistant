@@ -15,6 +15,7 @@ import base64
 import binascii
 import ipaddress
 import os
+import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,7 +53,13 @@ _SECRET_NAMES: Final = (
     "DATABASE_URL",
     "ANTHROPIC_API_KEY",
     "VOYAGE_API_KEY",
+    "KNOWLEDGE_MCP_TOKEN",
 )
+
+# The `knowledge` process (`APP_PROCESS=knowledge`) needs these and no other secret: it signs
+# nothing and calls no model, so the rest get a random value at each boot and nothing signed there
+# verifies anywhere.
+_KNOWLEDGE_SECRET_NAMES: Final = ("DATABASE_URL", "VOYAGE_API_KEY", "KNOWLEDGE_MCP_TOKEN")
 
 _DEVELOPMENT_DEFAULTS: Final = {
     # Not a real key and not shaped like one: development and every test run on the scripted fake.
@@ -65,6 +72,7 @@ _DEVELOPMENT_DEFAULTS: Final = {
     "ENCRYPTION_KEY": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
     # The provider's local service. The URL carries the password, so it is a secret.
     "DATABASE_URL": "postgres://app:app@127.0.0.1:5432/app",
+    "KNOWLEDGE_MCP_TOKEN": "dev-only-knowledge-mcp-token-not-real-0123456789",
 }
 
 # Docker Compose passes an unset `${VAR}` as an empty string; blank means unset.
@@ -77,6 +85,8 @@ _BLANK_IS_UNSET: Final = (
     "ANTHROPIC_BASE_URL",
     "VOYAGE_BASE_URL",
     "GITHUB_BASE_URL",
+    "APP_PROCESS",
+    "KNOWLEDGE_MCP_URL",
 )
 
 _MIN_SECRET_LENGTH: Final = 32
@@ -172,6 +182,9 @@ class Env(BaseModel):
     )
 
     app_env: Literal["development", "test", "production"] = "development"
+    # Which process this is: the API (and its migrate and grant-admin commands) or the `knowledge`
+    # MCP server. Required in production, so a service started without it fails at boot.
+    app_process: Literal["backend", "knowledge"] = "backend"
     port: Annotated[int, Field(gt=0, le=65535)] = 8000
     trust_proxy: Annotated[
         TrustProxy, BeforeValidator(_parse_trust_proxy), AfterValidator(_check_trust_proxy)
@@ -204,6 +217,10 @@ class Env(BaseModel):
     # production.
     voyage_base_url: Annotated[str, Field(min_length=1)] | None = None
     github_base_url: Annotated[str, Field(min_length=1)] | None = None
+    # Where the API reaches the `knowledge` server, and the bearer token both sides share. The
+    # token is a secret: the server compares it in constant time.
+    knowledge_mcp_url: Annotated[str, Field(min_length=1)] = "http://127.0.0.1:8001/mcp"
+    knowledge_mcp_token: Secret
 
 
 @dataclass(frozen=True)
@@ -212,18 +229,29 @@ class LoadedEnv:
     defaulted_secrets: list[str]
 
 
-def _placeholder_problems(source: Mapping[str, str]) -> list[str]:
+def _random_secrets() -> dict[str, str]:
+    """A value for every secret the `knowledge` process does not use, new at each boot."""
+    return {
+        "JWT_ACCESS_SECRET": secrets.token_urlsafe(48),
+        "JWT_REFRESH_SECRET": secrets.token_urlsafe(48),
+        "OTP_SECRET": secrets.token_urlsafe(48),
+        "ENCRYPTION_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
+        "ANTHROPIC_API_KEY": secrets.token_urlsafe(48),
+    }
+
+
+def _placeholder_problems(source: Mapping[str, str], names: tuple[str, ...]) -> list[str]:
     """A copied example file or the development default must not reach production: the secrets
     would be public. Only the name is reported, never the value."""
     problems: list[str] = []
-    for name in _SECRET_NAMES:
+    for name in names:
         value = source.get(name, "")
         if value == "":
             continue
         if value.startswith(("change-me", "dev-only-")) or value == _DEVELOPMENT_DEFAULTS[name]:
             problems.append(f"{name}: is a placeholder, set a real secret")
     access = source.get("JWT_ACCESS_SECRET", "")
-    if access != "" and access == source.get("JWT_REFRESH_SECRET"):
+    if "JWT_ACCESS_SECRET" in names and access != "" and access == source.get("JWT_REFRESH_SECRET"):
         problems.append("JWT_REFRESH_SECRET: must differ from JWT_ACCESS_SECRET")
     return problems
 
@@ -245,21 +273,34 @@ def load_env(source: Mapping[str, str]) -> LoadedEnv:
         for name, value in source.items()
         if not (name in _BLANK_IS_UNSET and value.strip() == "")
     }
+    knowledge = production and values.get("APP_PROCESS") == "knowledge"
     if not production:
         for name in _SECRET_NAMES:
             if source.get(name, "") == "":
                 values[name] = _DEVELOPMENT_DEFAULTS[name]
                 defaulted.append(name)
+    if knowledge:
+        # Never the model key this process was handed by mistake: it holds none.
+        values |= _random_secrets()
 
     if production:
-        problems = _placeholder_problems(source)
+        problems = _placeholder_problems(
+            source, _KNOWLEDGE_SECRET_NAMES if knowledge else _SECRET_NAMES
+        )
         if problems:
             raise EnvError(f"invalid environment: {'; '.join(problems)}")
+    missing_process = ["APP_PROCESS: is required in production"] if production else []
+    if "APP_PROCESS" in values:
+        missing_process = []
 
     try:
         parsed = Env.model_validate(values)
     except ValidationError as error:
-        raise EnvError(f"invalid environment: {'; '.join(_issue_messages(error))}") from None
+        raise EnvError(
+            f"invalid environment: {'; '.join([*_issue_messages(error), *missing_process])}"
+        ) from None
+    if missing_process:
+        raise EnvError(f"invalid environment: {missing_process[0]}")
     if parsed.mail_provider != "console" and "MAIL_FROM" not in values:
         raise EnvError(
             "invalid environment: MAIL_FROM: is required when MAIL_PROVIDER is not console"

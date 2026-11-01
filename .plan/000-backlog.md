@@ -18,16 +18,18 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] agent searches the knowledge base through our MCP server
 - [ ] user approves sensitive tool calls
 - [ ] agent acts on GitHub through the GitHub MCP server
+- [ ] admin can manage MCP servers and tool policy
 - [ ] agent remembers long-term knowledge across conversations
 - [ ] agent returns schema-validated structured results
+- [ ] agent reads a file from the knowledge base
 - [ ] admin can measure answer correctness with an eval run
 - [ ] admin can manage eval cases
 - [ ] agent runs have a spend cap
 - [ ] search has a global spend cap
 - [ ] concurrent searches are capped below the pool size
+- [ ] knowledge server connects with a read-only database role
 - [ ] reloading a guarded route in development stays on that route | stack:frontend
 - [ ] starting a conversation is rate limited
 - [ ] starting an eval run is rate limited per admin
@@ -54,3 +56,4 @@ Example: `- [ ] user can sign in with email`
 - [x] settled e2e test does not race its timers (2026-10-31, plan 007)
 - [x] verify keeps the web server's output when e2e fails (2026-10-31, plan 008)
 - [x] admin can measure retrieval quality with an eval run (2026-10-31, plan 009)
+- [x] agent searches the knowledge base through our MCP server (2026-11-01, plan 010)

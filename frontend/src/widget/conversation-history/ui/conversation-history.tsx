@@ -8,6 +8,7 @@ import { inReadingOrder } from '@/entity/message/model'
 import { MessageItem } from '@/entity/message/ui/message-item'
 import { useRunStream } from '@/entity/run/api/use-run-stream'
 import { isActiveRun, type RunView } from '@/entity/run/model'
+import { McpServerNotice } from '@/entity/run/ui/mcp-server-notice'
 import { RunErrorAlert } from '@/entity/run/ui/run-error-alert'
 import { ToolCallRow } from '@/entity/run/ui/tool-call-row'
 import { SendMessageForm } from '@/feature/send-message/ui/send-message-form'
@@ -116,6 +117,10 @@ function LiveRun({
       {view.blocks.map((block, index) =>
         block.kind === 'text' ? (
           <MessageItem key={index} message={{ role: 'assistant', text: block.text }} />
+        ) : block.kind === 'notice' ? (
+          <li key={`notice-${block.name}`}>
+            <McpServerNotice name={block.name} />
+          </li>
         ) : (
           <ToolCallRow key={block.toolUseId} call={block} />
         ),

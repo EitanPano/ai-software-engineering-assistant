@@ -354,6 +354,8 @@ class TestProviderResolutionAtBoot:
                 "DATABASE_URL": DATABASE_URL,
                 "ANTHROPIC_API_KEY": "a-production-anthropic-key-of-some-length",
                 "VOYAGE_API_KEY": "a-production-voyage-key-of-some-length",
+                "KNOWLEDGE_MCP_TOKEN": "d" * 40,
+                "APP_PROCESS": "backend",
             }
         )
 

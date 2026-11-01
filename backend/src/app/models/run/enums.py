@@ -27,6 +27,7 @@ class RunEventType(StrEnum):
     text_delta = "text_delta"
     tool_call_started = "tool_call_started"
     tool_call_finished = "tool_call_finished"
+    mcp_server_unavailable = "mcp_server_unavailable"
     run_finished = "run_finished"
 
 

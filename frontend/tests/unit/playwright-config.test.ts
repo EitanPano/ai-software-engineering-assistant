@@ -59,6 +59,32 @@ describe('playwright.config.ts', () => {
     expect(api?.env?.VOYAGE_API_KEY).not.toMatch(/^pa-/)
   })
 
+  it('starts the knowledge server after the API, on its own port, with the API pointed at it', async () => {
+    const config = await load({ E2E_BASE_URL: '', E2E_DATABASE_URL: 'postgres://u:p@h/app_e2e' })
+    const servers = [config.webServer ?? []].flat()
+    const knowledge = servers.find((server) => server.command.includes('app.knowledge_main'))
+    const api = servers.find((server) => server.command.includes('app.main'))
+
+    expect(knowledge?.name).toBe('knowledge')
+    expect(knowledge?.url).toBe('http://127.0.0.1:8104/health')
+    expect(knowledge?.reuseExistingServer).toBe(false)
+    // After the API: its command prepares the database, and a second e2e-db would empty it.
+    expect(servers.indexOf(knowledge as (typeof servers)[number])).toBeGreaterThan(
+      servers.indexOf(api as (typeof servers)[number]),
+    )
+    expect(knowledge?.command).not.toContain('e2e-db')
+    expect(knowledge?.env?.DATABASE_URL).toBe('postgres://u:p@h/app_e2e')
+    expect(knowledge?.env?.VOYAGE_BASE_URL).toBe('http://127.0.0.1:8103')
+    expect(knowledge?.env?.APP_PROCESS).toBe('knowledge')
+    expect(api?.env?.KNOWLEDGE_MCP_URL).toBe('http://127.0.0.1:8104/mcp')
+    // The same placeholder on both sides, not shaped like a secret.
+    expect(knowledge?.env?.KNOWLEDGE_MCP_TOKEN).toBeTruthy()
+    expect(knowledge?.env?.KNOWLEDGE_MCP_TOKEN).toBe(api?.env?.KNOWLEDGE_MCP_TOKEN)
+    // Left at Playwright's default (ignored), as on the API: no one-time code is printed here.
+    expect(knowledge).not.toHaveProperty('stdout')
+    expect(api).not.toHaveProperty('stdout')
+  })
+
   it('keeps an explicit E2E_BASE_URL and starts nothing', async () => {
     const config = await load({ E2E_BASE_URL: 'http://127.0.0.1:3000' })
 

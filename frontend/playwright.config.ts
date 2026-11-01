@@ -20,6 +20,9 @@ const databaseUrl = external
 const FAKE_PORT = 8101
 const GITHUB_FAKE_PORT = 8102
 const VOYAGE_FAKE_PORT = 8103
+const KNOWLEDGE_PORT = 8104
+// A placeholder both sides share; it signs nothing and protects only this suite's own processes.
+const KNOWLEDGE_TOKEN = 'e2e-placeholder-knowledge-token-not-a-secret'
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -102,6 +105,30 @@ export default defineConfig({
             VOYAGE_API_KEY: 'e2e-placeholder-not-a-key',
             E2E_DATABASE_URL: databaseUrl,
             DATABASE_URL: databaseUrl,
+            KNOWLEDGE_MCP_URL: `http://127.0.0.1:${KNOWLEDGE_PORT}/mcp`,
+            KNOWLEDGE_MCP_TOKEN: KNOWLEDGE_TOKEN,
+          },
+        },
+        {
+          // Our `knowledge` MCP server, the process the agent's search tool calls. It starts after
+          // the API because the API's command prepares the database (a second `e2e-db` would
+          // empty its tables) and it connects postgres alone. Voyage is the fake. `stdout` stays
+          // at Playwright's default (ignored), as on the API but for another reason: it sends no
+          // one-time code, its warnings, errors and tracebacks arrive on stderr, and its info
+          // lines would crowd the 12-line tail.
+          name: 'knowledge',
+          command: 'uv run python -m app.knowledge_main',
+          cwd: '../backend',
+          url: `http://127.0.0.1:${KNOWLEDGE_PORT}/health`,
+          reuseExistingServer: false,
+          timeout: 120_000,
+          env: {
+            APP_PROCESS: 'knowledge',
+            PORT: String(KNOWLEDGE_PORT),
+            DATABASE_URL: databaseUrl,
+            VOYAGE_BASE_URL: `http://127.0.0.1:${VOYAGE_FAKE_PORT}`,
+            VOYAGE_API_KEY: 'e2e-placeholder-not-a-key',
+            KNOWLEDGE_MCP_TOKEN: KNOWLEDGE_TOKEN,
           },
         },
         {

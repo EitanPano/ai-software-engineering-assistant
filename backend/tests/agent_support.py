@@ -33,11 +33,17 @@ class RecordingFake:
 
     def __init__(self) -> None:
         self.requests: list[Json] = []
+        # The `anthropic-beta` header of each request, split into its flags.
+        self.betas: list[list[str]] = []
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["path"] != "/v1/messages":
             await fake_anthropic.app(scope, receive, send)
             return
+        header = next(
+            (value.decode() for name, value in scope["headers"] if name == b"anthropic-beta"), ""
+        )
+        self.betas.append([flag.strip() for flag in header.split(",") if flag.strip()])
         chunks: list[bytes] = []
         more = True
         while more:

@@ -24,10 +24,10 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 
 ## Features
 
-- Multiple MCP servers: our own `knowledge` server and GitHub's official server (planned)
+- Multiple MCP servers: our own `knowledge` server gives the agent its search; GitHub's official server (planned)
 - Knowledge sources: an admin connects a public GitHub repository, indexed by symbol and embedded
 - Hybrid RAG: semantic and keyword search over connected GitHub repositories
-- Agentic RAG: the agent decides when to retrieve more information (planned)
+- Agentic RAG: the agent decides when to search, searches again when a result does not answer, and cites file and line
 - Persistent agent memory: conversation history distinct from long-term knowledge (planned)
 - Tool execution permissions: human approval for sensitive actions (planned)
 - Streaming responses: intermediate tool activity shown as it happens
@@ -67,7 +67,9 @@ cd backend
 uv run --env-file .env python -m app.main
 ```
 
-The app never loads that file by itself, so use this command when you want your keys.
+The app never loads that file by itself, so use this command when you want your keys. The agent's
+search runs in the `knowledge` server, which needs `VOYAGE_API_KEY` too, so start it the same way:
+`uv run --env-file .env poe knowledge`.
 
 ### Installation
 
@@ -92,6 +94,10 @@ cd ..
 cd backend
 uv run python -m app.main --reload
 cd ..
+# knowledge server: the agent's search tool
+cd backend
+uv run poe knowledge
+cd ..
 # frontend
 cd frontend
 bun run dev
@@ -99,6 +105,9 @@ cd ..
 ```
 
 Open http://localhost:5173 once the dev servers are up.
+
+Start the `knowledge` server before your first conversation. A conversation keeps the tools it
+started with, so one started before the server was ever reached has no search: start a new one.
 
 To run the whole stack with Docker Compose (the app is then at http://localhost:8000):
 
@@ -133,6 +142,9 @@ docker compose --profile app up --build
 | `VOYAGE_API_KEY` | backend: Voyage AI key for the code embeddings (voyage-code-4, paid per token). Required in production; a fake default applies elsewhere, and tests and e2e run on a scripted fake. | — |
 | `VOYAGE_BASE_URL` | backend: Points the Voyage client at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
 | `GITHUB_BASE_URL` | backend: Points the GitHub client at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
+| `APP_PROCESS` | backend: Which process this is: backend (the API and its commands) or knowledge (the MCP server that offers the agent its search tool; it needs only DATABASE_URL, VOYAGE_API_KEY and KNOWLEDGE_MCP_TOKEN). Required in production; elsewhere it defaults to backend. | `backend` |
+| `KNOWLEDGE_MCP_URL` | backend: Where the agent reaches the knowledge MCP server (`uv run poe knowledge`, port 8001). | `http://127.0.0.1:8001/mcp` |
+| `KNOWLEDGE_MCP_TOKEN` | backend: Bearer token both sides share; the knowledge server refuses a call without it. Required in production, at least 32 characters; a fake default applies elsewhere. | — |
 | `DATABASE_URL` | backend: database/postgres provider Postgres connection URL. Required in production; outside production it defaults to the local service. Tests (testDb) use postgres://app:app@127.0.0.1:5432/app_test; override with TEST_DATABASE_URL. Browser tests (e2eDb) use postgres://app:app@127.0.0.1:5432/app_e2e; override with E2E_DATABASE_URL. | `postgres://app:app@127.0.0.1:5432/app` |
 <!-- configuration:end -->
 

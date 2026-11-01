@@ -99,6 +99,34 @@ describe('applyRunEvent', () => {
     expect(fold([toolFinished(1, 'succeeded', 'nope')]).blocks).toEqual([])
   })
 
+  it('shows a down server as a notice in place, and the run goes on', () => {
+    const down: RunEvent = {
+      type: 'mcp_server_unavailable',
+      sequence: 2,
+      createdAt: at,
+      name: 'knowledge',
+    }
+    const view = fold([delta(1, 'Hi. '), down, delta(3, 'Still here.')])
+
+    expect(view.blocks).toEqual([
+      { kind: 'text', text: 'Hi. ' },
+      { kind: 'notice', name: 'knowledge' },
+      { kind: 'text', text: 'Still here.' },
+    ])
+    expect(view.finished).toBeNull()
+  })
+
+  it('shows the same notice once when the event is replayed', () => {
+    const down: RunEvent = {
+      type: 'mcp_server_unavailable',
+      sequence: 1,
+      createdAt: at,
+      name: 'knowledge',
+    }
+
+    expect(fold([down, down]).blocks).toEqual([{ kind: 'notice', name: 'knowledge' }])
+  })
+
   it('records how the run finished', () => {
     const view = fold([
       started(1),

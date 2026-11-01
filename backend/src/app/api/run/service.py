@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 from psycopg.types.json import Jsonb
 
 from app.models.run.enums import RunErrorCode, RunEventType, RunStatus
-from app.models.run.interface import RunEventRecord, RunRecord
-from app.services.db import Executor, fetch_all, fetch_one, get_db
+from app.models.run.interface import RunEventRecord, RunRecord, ToolCallRecord
+from app.services.db import Executor, execute, fetch_all, fetch_one, get_db
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,11 @@ class _EventRow:
 @dataclass(frozen=True)
 class _Flag:
     found: bool
+
+
+@dataclass(frozen=True)
+class _Total:
+    total: int
 
 
 def _to_run(row: _RunRow) -> RunRecord:
@@ -200,6 +205,40 @@ async def insert_event(
     if row is None:
         raise RuntimeError("run_event insert returned no row")
     return _to_event(row)
+
+
+async def insert_tool_call(record: ToolCallRecord, *, db: Executor | None = None) -> None:
+    """One row per call; the pair (run, `tool_use_id`) is the API's identity of it, so a repeat
+    changes nothing."""
+    await execute(
+        """
+        insert into tool_call
+          (id, run_id, tool_use_id, mcp_server_id, tool_name, arguments, result, status, created_at)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        on conflict (run_id, tool_use_id) do nothing""",
+        (
+            record.id,
+            record.run_id,
+            record.tool_use_id,
+            record.mcp_server_id,
+            record.tool_name,
+            Jsonb(record.arguments),
+            record.result,
+            record.status,
+            record.created_at,
+        ),
+        db=db,
+    )
+
+
+async def count_tool_calls(run_id: str, *, db: Executor | None = None) -> int:
+    row = await fetch_one(
+        _Total,
+        "select count(*) as total from tool_call where run_id = %s",
+        (run_id,),
+        db=db,
+    )
+    return 0 if row is None else row.total
 
 
 async def list_events_after(

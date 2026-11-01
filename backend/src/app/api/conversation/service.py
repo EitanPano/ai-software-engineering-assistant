@@ -14,7 +14,8 @@ from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict
 
 from app.models.conversation.enums import MessageRole
 from app.models.conversation.interface import ConversationRecord, MessageRecord
-from app.services.db import Executor, fetch_all, fetch_one, get_db
+from app.models.conversation.type import ConversationPrefix
+from app.services.db import Executor, execute, fetch_all, fetch_one, get_db
 from app.services.utils.pagination import Slice, decode_cursor, encode_cursor, to_page
 
 
@@ -25,6 +26,12 @@ class _ConversationRow:
     title: str | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class _PrefixRow:
+    system_prompt: str | None
+    tool_definition: list[object] | None
 
 
 @dataclass(frozen=True)
@@ -158,6 +165,39 @@ async def list_conversations(
             db=db,
         )
     return to_page([_to_conversation(row) for row in rows], limit, _conversation_cursor)
+
+
+async def freeze_prefix(
+    conversation_id: str,
+    system_prompt: str,
+    tool_definition: list[dict[str, object]],
+    *,
+    db: Executor | None = None,
+) -> None:
+    """Stores the prompt and tools once: the conditional update changes nothing when they are
+    already stored, so the first request's bytes win however many runs race."""
+    await execute(
+        "update conversation set system_prompt = %s, tool_definition = %s "
+        "where id = %s and system_prompt is null",
+        (system_prompt, Jsonb(tool_definition), conversation_id),
+        db=db,
+    )
+
+
+async def find_prefix(
+    conversation_id: str, *, db: Executor | None = None
+) -> ConversationPrefix | None:
+    """What the conversation is bound to, or `None` before its first run."""
+    row = await fetch_one(
+        _PrefixRow,
+        "select system_prompt, tool_definition from conversation where id = %s",
+        (conversation_id,),
+        db=db,
+    )
+    if row is None or row.system_prompt is None:
+        return None
+    definitions = [entry for entry in row.tool_definition or [] if isinstance(entry, dict)]
+    return ConversationPrefix(system_prompt=row.system_prompt, tool_definition=definitions)
 
 
 async def touch_conversation(

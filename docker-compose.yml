@@ -34,6 +34,12 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
       LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
+      # Which process this is; required in production.
+      APP_PROCESS: backend
+      # How the agent reaches the `knowledge` MCP server, and the bearer token both share. The
+      # backend does not wait for the server: an outage of it never stops the API.
+      KNOWLEDGE_MCP_URL: http://knowledge:8001/mcp
+      KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
     # Single: the server is the public edge, so it publishes on every interface. With TRUST_PROXY
     # false no caller can choose its own client IP through X-Forwarded-For.
     ports: [ "8000:8000" ]
@@ -81,6 +87,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
       LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
+      APP_PROCESS: backend
+      KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
     command: python -m app.infra.scripts.migrate
     restart: "no"
     profiles:
@@ -88,6 +96,36 @@ services:
     depends_on:
       database:
         condition: service_healthy
+  knowledge:
+    # The `knowledge` MCP server: the agent's one tool, `search`, over the hybrid search. The
+    # backend's image and a process of its own, so its pool and its concurrency are its own. No
+    # published port: only the backend, on this network and with the bearer token, can call it.
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    command: python -m app.knowledge_main
+    environment:
+      APP_ENV: production
+      APP_PROCESS: knowledge
+      PORT: "8001"
+      # The only secrets this process reads (it holds no model key and signs nothing).
+      DATABASE_URL: ${DATABASE_URL-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
+      KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
+    profiles: [ "app" ]
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8001/health', timeout=2)" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    depends_on:
+      database:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
   frontend:
     # A build-only service that the server's build reads as its spa context (Compose 2.35.0 or
     # newer). No depends_on (the server's build waits for this one), no environment, no container.

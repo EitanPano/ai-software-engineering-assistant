@@ -4,9 +4,9 @@ It is not a `Resource`: readiness never depends on Anthropic, and an outage fail
 it, not the server.
 
 The request follows `.doc/conventions.md` (Claude API): the model comes from `LLM_MODEL`,
-`thinking` is omitted, `effort` is explicit, there are no sampling parameters and no forced
-`tool_choice`, the server-side `fallbacks` parameter is sent, and a top-level `cache_control`
-caches the prefix.
+`thinking` is adaptive with an erroring block binding, `effort` is explicit, there are no
+sampling parameters and no forced `tool_choice`, the server-side `fallbacks` parameter is sent,
+and a top-level `cache_control` caches the prefix.
 """
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -18,17 +18,23 @@ import httpx2
 from anthropic import AsyncAnthropic
 from anthropic.types.beta import BetaMessageParam, BetaToolUnionParam
 
-from app.config.constants import AGENT_EFFORT, AGENT_MAX_TOKENS, AGENT_SYSTEM_PROMPT
+from app.config.constants import AGENT_EFFORT, AGENT_MAX_TOKENS
 from app.config.env import env
 from app.models.conversation.type import HistoryTurn
 
 FALLBACK_BETA: Final = "server-side-fallback-2026-07-01"
+BINDING_BETA: Final = "thinking-binding-controls-2026-08-01"
 
 type Block = dict[str, object]
 
 
 class ModelUnavailable(Exception):  # noqa: N818  # named for what the run reports
     """The model API could not be reached or is overloaded or throttling: safe to retry later."""
+
+
+class InvalidModelOutput(Exception):  # noqa: N818  # named for what the model produced
+    """The stream carried something the SDK could not read (a tool input that is not JSON). It has
+    no message and no cause: the SDK's own text holds the raw input, which must reach no log."""
 
 
 @dataclass(frozen=True)
@@ -75,14 +81,26 @@ def _is_fallback(block: Block) -> bool:
 
 
 def echo_blocks(content: Sequence[object]) -> list[object]:
-    """The blocks to send back for an assistant turn: as stored, except what the API omits before
-    a `fallback` block. A model that declined handed over at that block; its own blocks (and any
-    tool call in them) are not part of the answer."""
+    """The blocks to send back for an assistant turn, by the API's "Continuing the conversation"
+    (refusals and fallback): from the final `fallback` block on, everything as stored; before it,
+    only `text` and `fallback` blocks, in order (each `fallback` stays where it appeared, because
+    the API validates the thinking blocks around it by position). `thinking`, `redacted_thinking`
+    and a client-side `tool_use` before it are dropped; the `tool_use` has no `tool_result`, as
+    tools run only from `served_blocks`. The page's paired `server_tool_use` case cannot arise: no
+    server tool is sent. A block of a type this code does not know before the boundary is dropped
+    as model-internal. A turn without a `fallback` block is echoed unchanged."""
     last = max(
         (i for i, block in enumerate(content) if isinstance(block, dict) and _is_fallback(block)),
         default=-1,
     )
-    return list(content[last:] if last >= 0 else content)
+    if last < 0:
+        return list(content)
+    kept_before = [
+        block
+        for block in content[:last]
+        if isinstance(block, dict) and block.get("type") in {"text", "fallback"}
+    ]
+    return [*kept_before, *content[last:]]
 
 
 def served_blocks(content: Sequence[Block]) -> list[Block]:
@@ -107,21 +125,30 @@ async def stream_turn(
     history: Sequence[HistoryTurn],
     tools: Sequence[dict[str, object]],
     on_text: Callable[[str], Awaitable[None]],
+    *,
+    system: str,
 ) -> TurnResult:
-    """One model call. `on_text` receives each text delta as it arrives. Connection failures,
-    timeouts, throttling and server errors surface as `ModelUnavailable`; anything else (a
-    rejected request) propagates and the run ends as `internal`."""
+    """One model call. `system` and `tools` are the conversation's frozen prefix
+    (`api/conversation/`), sent as they are: a thinking block is bound to them, and
+    `prefix_mismatch_behavior: "error"` makes an edit loud on any account instead of passing on one
+    that does not enforce the binding. `on_text` receives each text delta as it arrives.
+    Connection failures, timeouts, throttling and server errors surface as `ModelUnavailable`;
+    anything else (a rejected request) propagates and the run ends as `internal`."""
     try:
         async with _client().beta.messages.stream(
             model=env.llm_model,
             max_tokens=AGENT_MAX_TOKENS,
-            system=AGENT_SYSTEM_PROMPT,
+            system=system,
             messages=_messages(history),
             tools=cast("list[BetaToolUnionParam]", list(tools)) if tools else anthropic.omit,
+            thinking={
+                "type": "adaptive",
+                "block_binding": {"prefix_mismatch_behavior": "error"},
+            },
             output_config={"effort": AGENT_EFFORT},
             cache_control={"type": "ephemeral"},
             fallbacks="default",
-            betas=[FALLBACK_BETA],
+            betas=[FALLBACK_BETA, BINDING_BETA],
         ) as stream:
             async for text in stream.text_stream:
                 await on_text(text)
@@ -136,6 +163,10 @@ async def stream_turn(
     ) as error:
         # Chained for the server log; the run reports only `upstream_unavailable`.
         raise ModelUnavailable from error
+    except ValueError:
+        # The SDK's message for a tool input that is not JSON holds the raw input (a search query),
+        # which no log may carry: nothing of it is chained.
+        raise InvalidModelOutput from None
     except anthropic.APIStatusError as error:
         # A 529, or an `error` event in the middle of a stream (the response status is 200 then).
         if error.status_code >= 500 or _error_type(error.body) in _TRANSIENT_ERRORS:

@@ -5,6 +5,8 @@ export type ToolStatus = 'running' | 'succeeded' | 'failed' | 'denied'
 
 export type RunBlock =
   | { kind: 'text'; text: string }
+  // A tool server that was down for this run; the run goes on without its tools.
+  | { kind: 'notice'; name: string }
   | {
       kind: 'tool'
       toolUseId: string
@@ -63,6 +65,8 @@ export function applyRunEvent(view: RunView, event: RunEvent): RunView {
             : block,
         ),
       }
+    case 'mcp_server_unavailable':
+      return { ...next, blocks: [...view.blocks, { kind: 'notice', name: event.name }] }
     case 'run_finished':
       return { ...next, finished: { status: event.status, errorCode: event.errorCode } }
     default:

@@ -1,5 +1,6 @@
 import { BanIcon, CheckIcon, LoaderCircleIcon, XIcon, type LucideIcon } from 'lucide-react'
 
+import { visibleText } from '@/shared/lib/visible-text'
 import { Badge } from '@/shared/ui/badge'
 
 import { TOOL_STATUS_LABEL, type RunBlock, type ToolStatus } from '../model'
@@ -35,10 +36,21 @@ export function ToolCallRow({ call }: { call: Extract<RunBlock, { kind: 'tool' }
         <ToolStatusBadge status={call.status} />
       </div>
       <pre className="font-mono text-xs break-words whitespace-pre-wrap text-muted-foreground">
-        {JSON.stringify(call.input)}
+        {visibleText(JSON.stringify(call.input))}
       </pre>
       {call.output === undefined ? null : (
-        <pre className="font-mono text-xs break-words whitespace-pre-wrap">{call.output}</pre>
+        // A long output scrolls inside its own box, which the keyboard can reach and scroll.
+        <div
+          role="group"
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scroll box must take focus
+          tabIndex={0}
+          aria-label={`Output of ${call.name}`}
+          className="max-h-64 overflow-auto rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <pre className="font-mono text-xs break-words whitespace-pre-wrap">
+            {visibleText(call.output)}
+          </pre>
+        </div>
       )}
     </li>
   )

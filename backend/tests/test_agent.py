@@ -1,6 +1,3 @@
-import asyncio
-from collections.abc import Iterator
-
 import httpx
 import pytest
 
@@ -8,11 +5,9 @@ from app.api.agent.controller import execute_run
 from app.api.conversation.controller import read_history
 from app.config.constants import AGENT_MAX_TURNS
 from app.infra.pubsub import pubsub
-from app.services import tool
 from app.services.anthropic import ModelUnavailable
 from app.services.event import drain
 from app.services.logger import create_logger
-from app.services.tool import Tool, ToolInput
 from tests.agent_support import (
     Frame,
     RecordingFake,
@@ -22,19 +17,9 @@ from tests.agent_support import (
     stream,
     types_of,
 )
+from tests.fake_mcp import Servers
+from tests.fake_mcp import mcp_servers as mcp_servers
 from tests.store import reset_store, store_backed
-
-
-class EchoInput(ToolInput):
-    text: str
-
-
-async def echo(arguments: dict[str, object]) -> str:
-    return f"echo:{arguments['text']}"
-
-
-async def explode(arguments: dict[str, object]) -> str:
-    raise RuntimeError("secret internal detail")
 
 
 class Journey:
@@ -66,10 +51,10 @@ def finish_of(frames: list[Frame]) -> Frame:
 
 
 @pytest.fixture(autouse=True)
-def empty_registry() -> Iterator[None]:
-    tool.clear_tools()
-    yield
-    tool.clear_tools()
+def servers(mcp_servers: Servers) -> Servers:
+    """Every run lists its servers first, so every test has `knowledge` (real) and `lab`
+    (scripted) up unless it takes one down."""
+    return mcp_servers
 
 
 class StoreBacked:
@@ -162,35 +147,43 @@ class TestAnswer(StoreBacked):
 @store_backed
 class TestTools(StoreBacked):
     async def test_an_unregistered_tool_is_denied_and_never_runs(
-        self, client: httpx.AsyncClient, fake_model: RecordingFake
+        self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
     ) -> None:
+        await servers.register_lab()
         journey = Journey(client)
-        _, frames = await journey.run("[[tool:ghost]]")
+        _, frames = await journey.run("[[tool:lab__ghost]]")
 
-        assert tool.get_tool("ghost") is None
         assert types_of(frames)[:3] == ["run_started", "tool_call_started", "tool_call_finished"]
-        assert frames[1].event["name"] == "ghost"
+        assert frames[1].event["name"] == "lab__ghost"
         assert frames[1].event["input"] == {"text": "hi"}
         assert frames[2].event["status"] == "denied"
         assert text_of(frames) == "Tool done."
         assert finish_of(frames).event["status"] == "completed"
         result = _tool_results(fake_model.requests[1])[0]
         assert result["is_error"] is True
-        assert "tools" not in fake_model.requests[0]
+        assert servers.lab.calls == []
 
     async def test_a_registered_tool_runs_and_its_result_goes_back(
-        self, client: httpx.AsyncClient, fake_model: RecordingFake
+        self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
     ) -> None:
-        tool.register_tool(Tool("echo", "echoes", EchoInput, echo))
+        await servers.register_lab()
         journey = Journey(client)
 
-        _, frames = await journey.run("[[tool:echo]]")
+        _, frames = await journey.run("[[tool:lab__echo]]")
 
         assert frames[2].event["status"] == "succeeded"
         assert frames[2].event["output"] == "echo:hi"
         assert frames[1].event["toolUseId"] == frames[2].event["toolUseId"]
         first, second = fake_model.requests
-        assert [d["name"] for d in first["tools"]] == ["echo"]  # type: ignore[attr-defined]
+        assert [d["name"] for d in first["tools"]] == [  # type: ignore[attr-defined]
+            "knowledge__search",
+            "lab__boom",
+            "lab__echo",
+            "lab__first",
+            "lab__lookup",
+            "lab__loose",
+            "lab__second",
+        ]
         assert first["tools"][0]["strict"] is True  # type: ignore[index]
         sent = second["messages"]
         assert isinstance(sent, list)
@@ -200,21 +193,10 @@ class TestTools(StoreBacked):
         assert result["is_error"] is False
 
     async def test_parallel_calls_run_concurrently_and_return_in_one_user_turn(
-        self, client: httpx.AsyncClient, fake_model: RecordingFake
+        self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
     ) -> None:
-        started = {"first": asyncio.Event(), "second": asyncio.Event()}
-
-        def meeting(me: str, other: str) -> Tool:
-            async def run(arguments: dict[str, object]) -> str:
-                started[me].set()
-                # Each waits for the other: serial execution would never get past here.
-                await asyncio.wait_for(started[other].wait(), timeout=5)
-                return f"{me} done"
-
-            return Tool(me, me, EchoInput, run)
-
-        tool.register_tool(meeting("first", "second"))
-        tool.register_tool(meeting("second", "first"))
+        # `lab`'s `first` and `second` each wait for the other: serial execution never passes.
+        await servers.register_lab()
         journey = Journey(client)
 
         _, frames = await journey.run("[[parallel]]")
@@ -227,26 +209,27 @@ class TestTools(StoreBacked):
         assert len(sent) == 3  # user, assistant, ONE user turn with both results
 
     async def test_an_input_that_fails_validation_is_an_error_result_and_never_runs(
-        self, client: httpx.AsyncClient, fake_model: RecordingFake
+        self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
     ) -> None:
-        tool.register_tool(Tool("echo", "echoes", EchoInput, echo))
+        await servers.register_lab()
         journey = Journey(client)
 
-        _, frames = await journey.run("[[badtool:echo]]")
+        _, frames = await journey.run("[[badtool:lab__echo]]")
 
         assert frames[2].event["status"] == "failed"
         assert str(frames[2].event["output"]).startswith("invalid input")
         result = _tool_results(fake_model.requests[1])[0]
         assert result["is_error"] is True
         assert finish_of(frames).event["status"] == "completed"
+        assert servers.lab.calls == []
 
     async def test_a_tool_that_raises_gives_the_model_a_fixed_message(
-        self, client: httpx.AsyncClient, fake_model: RecordingFake
+        self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
     ) -> None:
-        tool.register_tool(Tool("boom", "fails", EchoInput, explode))
+        await servers.register_lab()
         journey = Journey(client)
 
-        _, frames = await journey.run("[[tool:boom]]")
+        _, frames = await journey.run("[[tool:lab__boom]]")
 
         assert frames[2].event["status"] == "failed"
         assert "secret" not in str(frames[2].event["output"])
@@ -257,7 +240,7 @@ class TestTools(StoreBacked):
         self, client: httpx.AsyncClient, fake_model: RecordingFake
     ) -> None:
         journey = Journey(client)
-        await journey.run("[[tool:ghost]]")
+        await journey.run("[[tool:lab__ghost]]")
 
         history = await read_history(journey.conversation)
 
@@ -324,7 +307,7 @@ class TestStopReason(StoreBacked):
     async def test_an_unexpected_error_ends_the_run_as_internal(
         self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def broken(*_: object) -> None:
+        async def broken(*_: object, **__: object) -> None:
             raise RuntimeError("detail that must not leave the server")
 
         monkeypatch.setattr("app.api.agent.controller.stream_turn", broken)
@@ -353,30 +336,20 @@ class TestStopReason(StoreBacked):
         assert [b["type"] for b in echoed] == ["fallback", "text"]
 
 
-class OptionalInput(ToolInput):
-    """Every field optional: an empty object passes this schema, which a non-object must not."""
-
-    text: str = "default"
-
-
 @store_backed
 class TestToolInput(StoreBacked):
     async def test_an_input_that_is_not_an_object_fails_the_run_and_is_never_stored_or_run(
-        self, client: httpx.AsyncClient, fake_model: RecordingFake
+        self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
     ) -> None:
-        ran: list[dict[str, object]] = []
-
-        async def optional(arguments: dict[str, object]) -> str:
-            ran.append(arguments)
-            return "ran"
-
-        tool.register_tool(Tool("loose", "all optional", OptionalInput, optional))
+        # `lab`'s `loose` takes every field optional: an empty object passes its schema, which a
+        # non-object must not.
+        await servers.register_lab()
         journey = Journey(client)
 
-        _, frames = await journey.run("[[stringinput:loose]]")
+        _, frames = await journey.run("[[stringinput:lab__loose]]")
         _, followup = await journey.run("hello again")
 
-        assert ran == []
+        assert servers.lab.calls == []
         # Nothing was started, so nothing dangles; the run ends once, as internal.
         assert types_of(frames) == ["run_started", "run_finished"]
         assert finish_of(frames).event["errorCode"] == "internal"

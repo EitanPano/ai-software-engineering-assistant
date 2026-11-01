@@ -27,7 +27,7 @@ from app.config.constants import CONVERSATION_TITLE_MAX_CHARS
 from app.middleware.auth import require_caller
 from app.models.conversation.enums import MessageRole
 from app.models.conversation.interface import ConversationRecord, MessageRecord
-from app.models.conversation.type import HistoryTurn, NewTurn
+from app.models.conversation.type import ConversationPrefix, HistoryTurn, NewTurn
 from app.models.run.enums import RunErrorCode, RunStatus
 from app.services.event import RUN_CREATED, publish
 from app.services.logger import log
@@ -189,6 +189,20 @@ async def read_history(conversation_id: str) -> list[HistoryTurn]:
         )
         for record in records
     ]
+
+
+async def freeze_prefix(
+    conversation_id: str, *, system_prompt: str, tools: list[dict[str, object]]
+) -> ConversationPrefix:
+    """System operation: binds the conversation to a system prompt and tool list, once, at its
+    first run, and returns what is stored. A thinking block is bound to both and to every earlier
+    message, so every later request replays exactly these bytes, whatever the servers list then;
+    a conversation that already has them keeps them."""
+    await service.freeze_prefix(conversation_id, system_prompt, tools)
+    prefix = await service.find_prefix(conversation_id)
+    if prefix is None:
+        raise RuntimeError("conversation prefix was not stored")
+    return prefix
 
 
 async def append_turns(conversation_id: str, run_id: str, turns: list[NewTurn]) -> None:

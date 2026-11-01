@@ -369,6 +369,12 @@ export const zRunEvent = z.union([
     output: z.string(),
   }),
   z.object({
+    type: z.literal('mcp_server_unavailable').optional().default('mcp_server_unavailable'),
+    sequence: z.int(),
+    createdAt: z.iso.datetime(),
+    name: z.string(),
+  }),
+  z.object({
     type: z.literal('run_finished').optional().default('run_finished'),
     sequence: z.int(),
     createdAt: z.iso.datetime(),

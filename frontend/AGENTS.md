@@ -360,6 +360,15 @@ tests.fake_anthropic` from `backend/` on port 8101, before the API, and points t
   The fake GitHub serves the fixture repository for any `<owner>/<repo>` and picks a script by the
   repository name (`tests/e2e/source-support.ts › REPOSITORY`: `missing-<token>`, `embedfail-<key>`);
   `source.spec.ts` registers nothing under `E2E_BASE_URL`.
+- **The knowledge server.** `playwright.config.ts` starts `python -m app.knowledge_main` as web
+  server `name: 'knowledge'` (the prefix the tail reporter groups by) on port 8104, after the API:
+  the API's command runs `e2e-db`, and a second one would empty the tables. It uses Voyage's fake,
+  `APP_PROCESS=knowledge`, and shares a placeholder `KNOWLEDGE_MCP_TOKEN` with the API, which
+  gets `KNOWLEDGE_MCP_URL`. Its `stdout` stays at Playwright's `ignore`, as the API's does but for
+  another reason: it prints no one-time code, its warnings, errors and tracebacks arrive on
+  stderr, and its info lines would crowd the 12-line tail. `knowledge.spec.ts` (an admin connects
+  the fixture, sends `MARKER.research`, reads two tool rows and the cited answer) registers
+  nothing under `E2E_BASE_URL`.
 - **The staff group.** `/source` and `/source/connect` sit in a pathless admin group in
   `routes.tsx`, each loader calling `requireRole(queryClient, 'admin')`. Their e2e accounts are
   promoted by `grantAdmin` (`tests/e2e/source-support.ts`), which runs the server's `grant_admin`

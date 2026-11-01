@@ -15,7 +15,7 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
 | `backend/` | HTTP API, validation, business rules, persistence; serves the SPA's files in `single` | The server's container; port in `.fullstack/catalog.yaml` |
 | Stack | The packages and their templates | `react-python-fastapi`: `backend/` from `server/python-fastapi` 1.2.1, `frontend/` from `frontend/react` 2.1.1. A single-page app, because no public page needs search or sharing |
 | Data store | System of record | Compose service `database`, port 5432 on loopback |
-| `knowledge` MCP server | Our own MCP server: search and read over the knowledge base, on Streamable HTTP | Its own Compose service, from the `backend/` image with a different command |
+| `knowledge` MCP server | Our own MCP server: one tool, `search`, over the knowledge base, on Streamable HTTP. A `read` tool is planned | Its own Compose service, from the `backend/` image with a different command; no published port |
 | GitHub MCP server | GitHub's official MCP server: the agent's GitHub tools, write tools behind approval | Its own Compose service |
 
 ## Data Flow
@@ -47,7 +47,15 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
    ends that lost run as `interrupted`, and pending approvals survive.
 9. Tools: the backend is the MCP client, never Anthropic's MCP connector, whose tool calls run
    on Anthropic's side where the approval gate cannot intercept them. `tool_policy` decides each
-   call: allow, ask or deny. A tool with no policy is denied.
+   call: allow, ask or deny. A tool with no policy is denied, and `ask` denies until approvals
+   exist. Every run lists each enabled server and stores the last good listing on its
+   `mcp_server` row; the model sees `<server>__<tool>`, and a server that is down is reported in
+   the run, which goes on. `knowledge`'s URL and token come from the environment, any other row's
+   URL from the row. A conversation stores its system prompt and tool definitions at its first
+   run and replays those bytes, because thinking blocks are bound to them, so a later tool
+   reaches only new conversations until a plan adds `tool_addition`. A run spends at most
+   `AGENT_TOOL_CALLS_PER_RUN` calls, counted from `tool_call`, so `knowledge`'s own concurrency
+   slots and that budget bound what the route's rate limit does not reach.
 10. Approval: an `ask` call stops the run at `awaiting_approval`, with no process waiting. The
     decision resumes the run from Postgres, so an approval may take hours and survive a restart.
 11. Retrieval: hybrid search fuses `pgvector`, full-text and trigram results with reciprocal rank
@@ -89,15 +97,16 @@ The harness ships no database. A provider chosen at the bootstrap wires one; oth
 Planned; each task's migration creates its tables and the code wins on conflict. `user` and
 `session` ship with the template.
 
-- `conversation`: owner `user`; title.
+- `conversation`: owner `user`; title; the system prompt and tool definitions frozen at its first
+  run.
 - `message`: `conversation`, `run`; position, role (`user`, `assistant`, `tool_result`), content
   blocks (JSONB), text.
 - `run`: `conversation`, owner `user`; status, error code. No model or token usage yet.
 - `run_event`: `run`; sequence number, type, payload (JSONB).
-- `tool_call`: `run`; `mcp_server`, tool name, arguments, result, status.
+- `tool_call`: `run`, tool use id; `mcp_server`, tool name, arguments, result, status.
 - `approval`: `tool_call`; decision, deciding `user`, reason.
 - `tool_policy`: `mcp_server`, tool name; effect (allow, ask, deny).
-- `mcp_server`: name, URL, enabled.
+- `mcp_server`: name, URL (null for `knowledge`), enabled, last good tool definitions.
 - `source`: repository URL, ref, status, error code, indexed commit, counts.
 - `document`: `source`; path, language.
 - `chunk`: `document`; symbol, line range, content, embedding, and the stored `keyword` that
@@ -206,6 +215,18 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-11-01: the agent searches through our `knowledge` MCP server, the first tool offered to the
+  real model. A new process, `python -m app.knowledge_main`, is a new auth boundary: `POST /mcp`
+  takes `Authorization: Bearer <KNOWLEDGE_MCP_TOKEN>`, else 401, behind a `Host` allow-list, with
+  `GET /health` open; it publishes no port and binds loopback outside production, because the
+  development token is committed. Tables `mcp_server`, `tool_policy` and `tool_call`, and
+  `conversation.system_prompt` and `conversation.tool_definition` (`0009-mcp-server.sql`, which
+  seeds `knowledge` and `search` at `allow` and backfills a stored conversation with the old prompt
+  and no tools). `RunEvent` gains `mcp_server_unavailable`. `tool_policy` is enforced in the loop
+  before execution and denies when nothing matches. Every request sets
+  `prefix_mismatch_behavior: "error"`, so an edited history fails loudly on any account. The
+  `mcp` and `jsonschema` packages are new; the tool's results are mapped field by field, so cosine,
+  score and ranks stay out of the model's view. No route manages servers or policy yet.
 - 2026-10-31: retrieval evals. Routes `POST` and `GET /api/eval-run` and `GET /api/eval-run/{id}`,
   admin only, and tables `eval_case` and `eval_run` (`0008-eval.sql`). A partial unique index allows
   one active run, and a second start is a 409. A run calls `search_knowledge_base` directly, so

@@ -1,75 +1,161 @@
-from collections.abc import Iterator
+import json
 
 import pytest
 
+from app.models.mcp_server.type import ListedTool
+from app.models.tool_policy.enums import PolicyEffect
 from app.services import tool
-from app.services.tool import InvalidToolInput, Tool, ToolInput
+from app.services.tool import InvalidToolInput
+
+ECHO_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {"text": {"type": "string"}},
+    "required": ["text"],
+    "additionalProperties": False,
+}
 
 
-class EchoInput(ToolInput):
-    text: str
-
-
-async def echo(arguments: dict[str, object]) -> str:
-    return str(arguments["text"])
-
-
-def make(name: str) -> Tool:
-    return Tool(name=name, description=f"{name} tool", input_model=EchoInput, run=echo)
-
-
-@pytest.fixture(autouse=True)
-def empty_registry() -> Iterator[None]:
-    tool.clear_tools()
-    yield
-    tool.clear_tools()
+def listed(name: str, schema: dict[str, object] | None = None) -> ListedTool:
+    return ListedTool(name=name, description=f"{name} tool", input_schema=schema or ECHO_SCHEMA)
 
 
 class TestDecide:
     def test_denies_a_tool_that_was_never_registered(self) -> None:
-        assert tool.decide("anything") == "deny"
+        """No policy row is `None`: the call is denied."""
+        assert tool.decide(None) == "deny"
 
     def test_allows_a_registered_tool_and_only_that_one(self) -> None:
-        tool.register_tool(make("echo"))
-
-        assert tool.decide("echo") == "allow"
-        assert tool.decide("other") == "deny"
+        """Only the `allow` effect passes."""
+        assert tool.decide(PolicyEffect.allow) == "allow"
+        assert tool.decide(PolicyEffect.deny) == "deny"
+        # Until the approval task lands, `ask` is refused like `deny`.
+        assert tool.decide(PolicyEffect.ask) == "deny"
 
     def test_is_empty_by_default(self) -> None:
-        assert tool.definitions() == []
+        assert tool.definitions({}) == []
+        assert tool.definitions({"lab": []}) == []
+
+
+class TestNames:
+    def test_the_model_sees_server_and_tool_joined_by_two_underscores(self) -> None:
+        assert tool.model_name("knowledge", "search") == "knowledge__search"
+
+    def test_splits_at_the_first_separator(self) -> None:
+        assert tool.split_name("knowledge__search") == ("knowledge", "search")
+        assert tool.split_name("lab__a__b") == ("lab", "a__b")
+
+    @pytest.mark.parametrize("name", ["search", "__search", "knowledge__", "", "__"])
+    def test_a_name_without_both_parts_belongs_to_no_server(self, name: str) -> None:
+        assert tool.split_name(name) is None
 
 
 class TestDefinitions:
     def test_are_sorted_by_name_and_strict(self) -> None:
-        tool.register_tool(make("zeta"))
-        tool.register_tool(make("alpha"))
+        definitions = tool.definitions(
+            {"lab": [listed("zeta"), listed("alpha")], "aaa": [listed("x")]}
+        )
 
-        definitions = tool.definitions()
-
-        assert [definition["name"] for definition in definitions] == ["alpha", "zeta"]
+        assert [definition["name"] for definition in definitions] == [
+            "aaa__x",
+            "lab__alpha",
+            "lab__zeta",
+        ]
         assert definitions[0]["strict"] is True
         assert definitions[0]["eager_input_streaming"] is True
+        assert definitions[0]["description"] == "x tool"
         schema = definitions[0]["input_schema"]
         assert isinstance(schema, dict)
         assert schema["additionalProperties"] is False
 
     def test_are_byte_stable(self) -> None:
-        tool.register_tool(make("echo"))
+        listings = {"lab": [listed("b"), listed("a")]}
 
-        assert str(tool.definitions()) == str(tool.definitions())
+        first = json.dumps(tool.definitions(listings))
+        second = json.dumps(tool.definitions({"lab": [listed("a"), listed("b")]}))
+
+        assert first == second
+
+    def test_adds_strict_and_streaming_once(self) -> None:
+        definition = tool.definitions({"lab": [listed("echo")]})[0]
+
+        assert list(definition) == [
+            "name",
+            "description",
+            "input_schema",
+            "strict",
+            "eager_input_streaming",
+        ]
+
+    def test_leaves_the_servers_schema_untouched(self) -> None:
+        schema: dict[str, object] = {"type": "object", "properties": {}}
+
+        definition = tool.definitions({"lab": [listed("echo", schema)]})[0]
+
+        assert definition["input_schema"] == schema
+        assert definition["input_schema"] is not schema
 
 
 class TestValidateInput:
     def test_returns_the_parsed_input(self) -> None:
-        assert tool.validate_input(make("echo"), {"text": "hi"}) == {"text": "hi"}
+        assert tool.validate_input(ECHO_SCHEMA, {"text": "hi"}) == {"text": "hi"}
 
     def test_names_the_failing_field_and_never_the_value(self) -> None:
         with pytest.raises(InvalidToolInput) as failure:
-            tool.validate_input(make("echo"), {"text": 5, "extra": "secret-value"})
+            tool.validate_input(ECHO_SCHEMA, {"text": 5, "extra": "secret-value"})
 
         assert "text" in str(failure.value)
         assert "secret-value" not in str(failure.value)
+        assert str(failure.value).startswith("invalid input")
 
     def test_refuses_an_input_with_unknown_fields(self) -> None:
+        with pytest.raises(InvalidToolInput) as failure:
+            tool.validate_input(ECHO_SCHEMA, {"text": "hi", "extra": 1})
+
+        assert "extra" in str(failure.value)
+
+    def test_names_a_missing_required_field(self) -> None:
+        with pytest.raises(InvalidToolInput) as failure:
+            tool.validate_input(ECHO_SCHEMA, {})
+
+        assert "text" in str(failure.value)
+
+    def test_checks_nested_fields(self) -> None:
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {
+                "options": {
+                    "type": "object",
+                    "properties": {"depth": {"type": "integer", "minimum": 1}},
+                    "required": ["depth"],
+                }
+            },
+            "required": ["options"],
+        }
+
+        assert tool.validate_input(schema, {"options": {"depth": 2}}) == {"options": {"depth": 2}}
+        with pytest.raises(InvalidToolInput) as failure:
+            tool.validate_input(schema, {"options": {"depth": 0}})
+
+        assert "options.depth" in str(failure.value)
+
+    def test_a_remote_reference_is_refused_and_never_fetched(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fetched: list[str] = []
+
+        def urlopen(url: str, *args: object, **kwargs: object) -> None:
+            fetched.append(url)
+            raise OSError("no network in a test")
+
+        monkeypatch.setattr("urllib.request.urlopen", urlopen)
+        schema: dict[str, object] = {"$ref": "http://169.254.169.254/latest/meta-data/x.json"}
+
+        with pytest.raises(InvalidToolInput) as failure:
+            tool.validate_input(schema, {"text": "hi"})
+
+        assert fetched == []
+        assert "169.254" not in str(failure.value)
+
+    def test_a_schema_that_is_itself_invalid_refuses_every_input(self) -> None:
         with pytest.raises(InvalidToolInput):
-            tool.validate_input(make("echo"), {"text": "hi", "extra": 1})
+            tool.validate_input({"type": "no-such-type"}, {"text": "hi"})

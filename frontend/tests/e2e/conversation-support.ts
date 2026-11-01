@@ -10,6 +10,9 @@ export const MARKER = {
   hold: (key: string) => `[[hold:${key}]]`,
   // A tool call nothing registered (so it is denied), then "Tool done."
   tool: (name: string) => `[[tool:${name}]]`,
+  // Two searches of the knowledge base, then an answer citing the last result's file and lines
+  // (backend/tests/fake_anthropic.py).
+  research: '[[research]]',
   // The run fails with `refused`.
   refuse: '[[refuse]]',
 }

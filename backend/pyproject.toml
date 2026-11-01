@@ -11,9 +11,19 @@ dependencies = [
   "fastapi>=0.161",
   # The SDK's HTTP client; named here because services/anthropic.py catches its transport errors.
   "httpx2>=2.16",
+  # A discovered tool's input schema is JSON Schema, and every tool input is validated against it
+  # before the tool runs (.doc/conventions.md).
+  "jsonschema>=4.23",
+  # Our MCP client and the `knowledge` server (.doc/conventions.md); imported only by
+  # services/mcp.py (an import-linter contract enforces it).
+  "mcp>=2.3,<3",
+  # The SDK's protocol types, imported directly by services/mcp.py (`import mcp_types`).
+  "mcp-types>=2.3,<3",
   "psycopg[binary,pool]>=3.3",
   "pydantic>=2.14",
   "pyjwt>=2.15",
+  # jsonschema's registry, imported by services/tool.py so a `$ref` is never fetched.
+  "referencing>=0.35",
   # Code chunking by symbol (.doc/conventions.md); imported only by services/parse_worker.py, the
   # parse child process (an import-linter contract enforces it).
   "tree-sitter>=0.26",
@@ -44,6 +54,8 @@ required-version = ">=0.12.23,<0.14"
 
 [tool.poe.tasks]
 dev = "python -m app.main --reload"
+# The `knowledge` MCP server by hand, on the port KNOWLEDGE_MCP_URL names (the API keeps 8000).
+knowledge = { cmd = "python -m app.knowledge_main", env = { PORT = "8001" } }
 format = [{ cmd = "ruff check --select I --fix" }, { cmd = "ruff format" }]
 format-check = "ruff format --check"
 typecheck = "mypy src tests"
@@ -81,6 +93,12 @@ plugins = ["pydantic.mypy"]
 module = ["apscheduler.*"]
 ignore_missing_imports = true
 
+# jsonschema ships no `py.typed` and its stubs are a separate package; `services/tool.py` is its
+# only importer and returns plain types.
+[[tool.mypy.overrides]]
+module = ["jsonschema", "jsonschema.*"]
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_typed = true
 init_forbid_extra = true
@@ -115,7 +133,7 @@ include_external_packages = true
 name = "layers: entry, server, routes, modules, middleware, services, config"
 type = "layers"
 layers = [
-  "app.main",
+  "app.main | app.knowledge_main",
   "app.server",
   "app.config.routes",
   "app.api",
@@ -152,6 +170,7 @@ forbidden_modules = [
   "app.services",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
 ]
 allow_indirect_imports = true
@@ -169,6 +188,7 @@ forbidden_modules = [
   "app.services",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.cors",
   "app.config.routes",
@@ -201,6 +221,7 @@ forbidden_modules = [
   "app.services",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.constants",
   "app.config.routes",
@@ -219,6 +240,7 @@ forbidden_modules = [
   "app.services.logger",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.cors",
   "app.config.routes",
@@ -236,6 +258,7 @@ forbidden_modules = [
   "app.services",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.env",
   "app.config.constants",
@@ -258,6 +281,7 @@ source_modules = [
   "app.services",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.env",
   "app.config.constants",
@@ -275,6 +299,7 @@ source_modules = [
   "app.infra",
   "app.services",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.env",
   "app.config.constants",
@@ -297,7 +322,14 @@ allow_indirect_imports = true
 name = "services never import middleware, api, server or entry"
 type = "forbidden"
 source_modules = ["app.services"]
-forbidden_modules = ["app.middleware", "app.api", "app.server", "app.main", "app.openapi"]
+forbidden_modules = [
+  "app.middleware",
+  "app.api",
+  "app.server",
+  "app.main",
+  "app.knowledge_main",
+  "app.openapi",
+]
 allow_indirect_imports = true
 
 # services/ outside the db, cache and event seams reaches infra through infra/dependency.py only;
@@ -334,6 +366,7 @@ forbidden_modules = [
   "app.infra.loop",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.routes",
 ]
@@ -363,6 +396,7 @@ forbidden_modules = [
   "app.infra.loop",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.config.routes",
 ]
@@ -387,6 +421,7 @@ source_modules = [
   "app.middleware",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
 ]
 forbidden_modules = ["app.services.db"]
@@ -402,6 +437,7 @@ source_modules = [
   "app.middleware",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
 ]
 forbidden_modules = ["app.services.cache"]
@@ -420,7 +456,14 @@ allow_indirect_imports = true
 name = "middleware never imports api, infra, server or entry"
 type = "forbidden"
 source_modules = ["app.middleware"]
-forbidden_modules = ["app.api", "app.infra", "app.server", "app.main", "app.openapi"]
+forbidden_modules = [
+  "app.api",
+  "app.infra",
+  "app.server",
+  "app.main",
+  "app.knowledge_main",
+  "app.openapi",
+]
 allow_indirect_imports = true
 
 # infra/ never imports middleware, the server or the entry, and its dependency and loop modules
@@ -429,7 +472,13 @@ allow_indirect_imports = true
 name = "infra never imports middleware, server or entry"
 type = "forbidden"
 source_modules = ["app.infra"]
-forbidden_modules = ["app.middleware", "app.server", "app.main", "app.openapi"]
+forbidden_modules = [
+  "app.middleware",
+  "app.server",
+  "app.main",
+  "app.knowledge_main",
+  "app.openapi",
+]
 allow_indirect_imports = true
 
 # The infra files outside jobs/, subscribers/ and scripts/ (those directories come with the modules
@@ -504,6 +553,7 @@ forbidden_modules = [
   "app.models",
   "app.server",
   "app.main",
+  "app.knowledge_main",
   "app.openapi",
   "app.services.anthropic",
   "app.services.cache",
@@ -513,6 +563,7 @@ forbidden_modules = [
   "app.services.event",
   "app.services.github",
   "app.services.logger",
+  "app.services.mcp",
   "app.services.parse",
   "app.services.security",
   "app.services.session",
@@ -667,7 +718,14 @@ unmatched_ignore_imports_alerting = "none"
 name = "server mounts config routes and imports no api or infra"
 type = "forbidden"
 source_modules = ["app.server"]
-forbidden_modules = ["app.models", "app.api", "app.infra", "app.services.utils", "app.main"]
+forbidden_modules = [
+  "app.models",
+  "app.api",
+  "app.infra",
+  "app.services.utils",
+  "app.main",
+  "app.knowledge_main",
+]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -681,6 +739,7 @@ forbidden_modules = [
   "app.infra",
   "app.middleware",
   "app.main",
+  "app.knowledge_main",
 ]
 allow_indirect_imports = true
 
@@ -711,7 +770,7 @@ source_modules = [
   "app.server",
   "app.openapi",
 ]
-forbidden_modules = ["app.main"]
+forbidden_modules = ["app.main", "app.knowledge_main"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -720,3 +779,40 @@ type = "forbidden"
 source_modules = ["app.api", "app.middleware", "app.infra", "app.services", "app.config"]
 forbidden_modules = ["app.server"]
 allow_indirect_imports = true
+
+# The `knowledge` entry connects `postgres` alone and serves one tool. It imports no HTTP layer, no
+# other entry, no module's routes or data layer, and none of `infra/` but the dependency list and
+# the store: a bus, a scheduler or a sweep here would end the API's live runs or run its jobs twice.
+[[tool.importlinter.contracts]]
+name = "the knowledge entry stays an entry"
+type = "forbidden"
+source_modules = ["app.knowledge_main"]
+forbidden_modules = [
+  "app.main",
+  "app.server",
+  "app.openapi",
+  "app.middleware",
+  "app.config.routes",
+  "app.config.constants",
+  "app.infra.pubsub",
+  "app.infra.scheduler",
+  "app.infra.memory",
+  "app.api.*.routes",
+  "app.api.*.service",
+  "app.api.*.schema",
+]
+allow_indirect_imports = true
+
+# The MCP SDK (`mcp`, with its types in `mcp_types`) is imported by services/mcp.py alone, as the
+# vendor SDKs are by their own services file; it is the seam that keeps the transport, the session
+# and the SDK's major version out of the loop.
+[[tool.importlinter.contracts]]
+name = "only services mcp imports the MCP SDK"
+type = "forbidden"
+source_modules = ["app"]
+forbidden_modules = ["mcp", "mcp_types"]
+allow_indirect_imports = true
+ignore_imports = [
+  "app.services.mcp -> mcp",
+  "app.services.mcp -> mcp_types",
+]

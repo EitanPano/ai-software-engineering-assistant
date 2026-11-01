@@ -1,6 +1,7 @@
+import { visibleText } from '@/shared/lib/visible-text'
 import { Badge } from '@/shared/ui/badge'
 
-import { chunkLabel, matchedKeyword, visibleText, type SearchHit } from '../model'
+import { chunkLabel, matchedKeyword, type SearchHit } from '../model'
 
 // One search hit: the repository, where the chunk is, its symbol and its text. The text is plain
 // (never Markdown, which would turn a chunk into links and headings) in a wrapping `pre`, so a

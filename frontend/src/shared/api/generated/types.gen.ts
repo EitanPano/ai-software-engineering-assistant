@@ -583,6 +583,21 @@ export type RunEvent =
       /**
        * Type
        */
+      type?: 'mcp_server_unavailable'
+      /**
+       * Sequence
+       */
+      sequence: number
+      createdAt: string
+      /**
+       * Name
+       */
+      name: string
+    }
+  | {
+      /**
+       * Type
+       */
       type?: 'run_finished'
       /**
        * Sequence

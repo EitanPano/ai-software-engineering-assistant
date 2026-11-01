@@ -19,6 +19,7 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | run event | One persisted step of a run, streamed over SSE and replayed on reconnect | table `run_event` |
 | lost run | A run still active whose process is gone, ended as `interrupted` by the sweep at the next boot | `fail_lost_runs` in module `run` |
 | tool call | One request by the agent to execute a tool, with its arguments and result | table `tool_call` |
+| tool definition | What a tool offers the model: its `<server>__<tool>` name, description and input schema | `mcp_server.tool_definition`, `conversation.tool_definition` |
 | approval | A human's decision on a tool call | table `approval`, route `/api/approval`, module `approval` |
 | tool policy | The rule that allows, asks about or denies a tool | table `tool_policy`, route `/api/tool-policy`, module `tool_policy` |
 | MCP server | A Model Context Protocol server the agent's tools come from | table `mcp_server`, route `/api/mcp-server`, module `mcp_server` |

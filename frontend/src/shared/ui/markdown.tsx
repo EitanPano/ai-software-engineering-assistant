@@ -31,6 +31,24 @@ const components: Components = {
       {children}
     </a>
   ),
+  // An image would load its URL the moment the answer renders, and the URL can carry whatever the
+  // model was steered to put in it. It becomes a link showing the alt text, so nothing loads
+  // without a click.
+  img: ({ src, alt }) => {
+    const label = alt?.trim() ? alt : 'Image'
+    return typeof src === 'string' && src !== '' ? (
+      <a
+        href={src}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-primary underline underline-offset-4"
+      >
+        {label}
+      </a>
+    ) : (
+      <span>{label}</span>
+    )
+  },
   blockquote: ({ children }) => (
     <blockquote className="border-l-2 border-border pl-3 text-muted-foreground">
       {children}

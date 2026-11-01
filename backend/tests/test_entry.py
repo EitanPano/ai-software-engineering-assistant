@@ -15,7 +15,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 LONG_VALUE = "a-production-value-of-at-least-32-characters"
 KEY = base64.b64encode(bytes([7]) * 32).decode()
 DEFAULT_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
-PRODUCTION = {"APP_ENV": "production", "ENCRYPTION_KEY": KEY}
+PRODUCTION = {"APP_ENV": "production", "APP_PROCESS": "backend", "ENCRYPTION_KEY": KEY}
 PRODUCTION |= {"DATABASE_URL": "postgres://app:a-real-password@db.internal:5432/app"}
 PRODUCTION |= {
     "JWT_ACCESS_SECRET": f"{LONG_VALUE}-1",
@@ -23,6 +23,15 @@ PRODUCTION |= {
     "OTP_SECRET": f"{LONG_VALUE}-3",
     "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4",
     "VOYAGE_API_KEY": f"{LONG_VALUE}-5",
+    "KNOWLEDGE_MCP_TOKEN": f"{LONG_VALUE}-6",
+}
+# What the `knowledge` process needs and nothing else.
+KNOWLEDGE_PRODUCTION = {
+    "APP_ENV": "production",
+    "APP_PROCESS": "knowledge",
+    "DATABASE_URL": PRODUCTION["DATABASE_URL"],
+    "VOYAGE_API_KEY": PRODUCTION["VOYAGE_API_KEY"],
+    "KNOWLEDGE_MCP_TOKEN": PRODUCTION["KNOWLEDGE_MCP_TOKEN"],
 }
 
 
@@ -90,6 +99,62 @@ class TestUvicornOptions:
         reloading = uvicorn_options(reload=True)
         assert reloading.get("reload") is True
         assert reloading.get("reload_dirs") == ["src"]
+
+
+class TestKnowledgeEntry:
+    """`app.knowledge_main` copies `main.py`'s uvicorn flags, because nothing may import `main.py`;
+    this holds the copy equal, so production cannot drift between the two entries."""
+
+    def test_shares_every_flag_with_the_api_entry(self) -> None:
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        api = dict(uvicorn_options(reload=False))
+        knowledge = dict(knowledge_options())
+
+        assert api.keys() == knowledge.keys()
+        # `host` is the one exception: it has no credential but a public development token, so it
+        # listens on loopback outside production (see the tests below).
+        for name in api.keys() - {"port", "host"}:
+            assert knowledge[name] == api[name], name
+
+    def test_binds_loopback_outside_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.config.env import env
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        for app_env in ("development", "test"):
+            monkeypatch.setattr(
+                "app.knowledge_main.env", env.model_copy(update={"app_env": app_env})
+            )
+            assert knowledge_options()["host"] == "127.0.0.1", app_env
+
+    def test_binds_every_interface_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.config.env import env
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        monkeypatch.setattr(
+            "app.knowledge_main.env", env.model_copy(update={"app_env": "production"})
+        )
+        assert knowledge_options()["host"] == "0.0.0.0"  # noqa: S104 the container's interface
+
+    def test_the_poe_task_serves_on_the_port_the_default_url_names(self) -> None:
+        import tomllib
+        from urllib.parse import urlparse
+
+        from app.config.env import load_env
+
+        tasks = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))["tool"]["poe"][
+            "tasks"
+        ]
+        task = tasks["knowledge"]
+        url = urlparse(load_env({}).env.knowledge_mcp_url)
+
+        assert task["cmd"] == "python -m app.knowledge_main"
+        assert task["env"]["PORT"] == str(url.port)
+
+    def test_has_no_reload(self) -> None:
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        assert "reload" not in knowledge_options()
 
 
 class TestLoadEnv:
@@ -186,6 +251,7 @@ class TestLoadEnv:
             "DATABASE_URL",
             "ANTHROPIC_API_KEY",
             "VOYAGE_API_KEY",
+            "KNOWLEDGE_MCP_TOKEN",
         ]
         assert loaded.env.app_env == "development"
         assert loaded.env.port == 8000
@@ -202,6 +268,7 @@ class TestLoadEnv:
             "DATABASE_URL",
             "ANTHROPIC_API_KEY",
             "VOYAGE_API_KEY",
+            "KNOWLEDGE_MCP_TOKEN",
         ]
 
     def test_requires_the_voyage_key_in_production_and_refuses_the_development_default(
@@ -297,7 +364,9 @@ class TestLoadEnv:
         secrets = load_env({"APP_ENV": "development", "ENCRYPTION_KEY": ""}).defaulted_secrets
         expected = ["ENCRYPTION_KEY"]
         expected[:0] = ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OTP_SECRET"]
-        expected.extend(["DATABASE_URL", "ANTHROPIC_API_KEY", "VOYAGE_API_KEY"])
+        expected.extend(
+            ["DATABASE_URL", "ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "KNOWLEDGE_MCP_TOKEN"]
+        )
         assert secrets == expected
 
     def test_reads_the_port_and_refuses_one_that_is_not_a_port(self) -> None:
@@ -403,6 +472,76 @@ class TestLoadEnv:
         for bad in ("0", "0.5", "-3", "abc", "inf", "nan", "", "1001", "1e300"):
             with pytest.raises(EnvError, match="RATE_LIMIT_SCALE"):
                 load_env({"RATE_LIMIT_SCALE": bad})
+
+    def test_requires_the_knowledge_token_in_production_and_refuses_the_development_default(
+        self,
+    ) -> None:
+        without = {k: v for k, v in PRODUCTION.items() if k != "KNOWLEDGE_MCP_TOKEN"}
+
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN"):
+            load_env(without)
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN: is a placeholder"):
+            load_env({**PRODUCTION, "KNOWLEDGE_MCP_TOKEN": f"dev-only-{LONG_VALUE}"})
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN"):
+            load_env({**PRODUCTION, "KNOWLEDGE_MCP_TOKEN": "short"})
+        assert load_env(PRODUCTION).env.knowledge_mcp_token == f"{LONG_VALUE}-6"
+        assert "KNOWLEDGE_MCP_TOKEN" in load_env({}).defaulted_secrets
+
+    def test_reads_the_knowledge_url_with_a_local_default_and_a_blank_as_unset(self) -> None:
+        default = load_env({}).env.knowledge_mcp_url
+
+        assert default == "http://127.0.0.1:8001/mcp"
+        assert load_env(
+            {"KNOWLEDGE_MCP_URL": "http://knowledge:8001/mcp"}
+        ).env.knowledge_mcp_url == ("http://knowledge:8001/mcp")
+        assert load_env({"KNOWLEDGE_MCP_URL": " "}).env.knowledge_mcp_url == default
+
+    def test_requires_the_process_in_production_only(self) -> None:
+        without = {k: v for k, v in PRODUCTION.items() if k != "APP_PROCESS"}
+
+        with pytest.raises(EnvError, match="APP_PROCESS: is required in production"):
+            load_env(without)
+        with pytest.raises(EnvError, match="APP_PROCESS"):
+            load_env({**PRODUCTION, "APP_PROCESS": "worker"})
+        with pytest.raises(EnvError, match="APP_PROCESS: is required in production"):
+            load_env({**PRODUCTION, "APP_PROCESS": ""})
+        assert load_env({}).env.app_process == "backend"
+        assert load_env(PRODUCTION).env.app_process == "backend"
+
+    def test_the_knowledge_process_needs_only_its_three_secrets(self) -> None:
+        loaded = load_env(KNOWLEDGE_PRODUCTION)
+
+        assert loaded.env.app_process == "knowledge"
+        assert loaded.defaulted_secrets == []
+        assert loaded.env.voyage_api_key == KNOWLEDGE_PRODUCTION["VOYAGE_API_KEY"]
+        assert loaded.env.knowledge_mcp_token == KNOWLEDGE_PRODUCTION["KNOWLEDGE_MCP_TOKEN"]
+
+    @pytest.mark.parametrize("missing", ["DATABASE_URL", "VOYAGE_API_KEY", "KNOWLEDGE_MCP_TOKEN"])
+    def test_the_knowledge_process_fails_naming_a_missing_secret(self, missing: str) -> None:
+        source = {k: v for k, v in KNOWLEDGE_PRODUCTION.items() if k != missing}
+
+        with pytest.raises(EnvError, match=missing):
+            load_env(source)
+
+    def test_the_knowledge_process_refuses_a_placeholder_token(self) -> None:
+        source = {**KNOWLEDGE_PRODUCTION, "KNOWLEDGE_MCP_TOKEN": f"change-me-{LONG_VALUE}"}
+
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN: is a placeholder"):
+            load_env(source)
+
+    def test_the_knowledge_process_fills_the_other_secrets_with_per_boot_random_values(
+        self,
+    ) -> None:
+        first = load_env(KNOWLEDGE_PRODUCTION).env
+        second = load_env(KNOWLEDGE_PRODUCTION).env
+
+        assert first.jwt_access_secret != second.jwt_access_secret
+        assert first.jwt_access_secret != first.jwt_refresh_secret
+        assert len(base64.b64decode(first.encryption_key)) == 32
+        assert first.anthropic_api_key != second.anthropic_api_key
+        # A key exported by mistake is replaced: this process never holds the model key.
+        leaked = {**KNOWLEDGE_PRODUCTION, "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4"}
+        assert load_env(leaked).env.anthropic_api_key != f"{LONG_VALUE}-4"
 
     def test_names_every_problem_at_once(self) -> None:
         with pytest.raises(EnvError) as raised:

@@ -6,7 +6,7 @@ It does not belong: the wire shape (`api/run/schema.py`) or value sets (`enums.p
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.models.run.enums import RunErrorCode, RunEventType, RunStatus
+from app.models.run.enums import RunErrorCode, RunEventType, RunStatus, ToolCallStatus
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,23 @@ class RunRecord:
     error_code: RunErrorCode | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ToolCallRecord:
+    """One tool call of a run, as the loop saw it. `mcp_server_id` and `tool_name` are the server
+    row that owns the name and the tool's own name; when no server row owns the name, the id is null
+    and `tool_name` is the name as the model used it. `result` is the text the model got back."""
+
+    id: str
+    run_id: str
+    tool_use_id: str
+    mcp_server_id: str | None
+    tool_name: str
+    arguments: dict[str, object]
+    result: str
+    status: ToolCallStatus
+    created_at: datetime
 
 
 @dataclass(frozen=True)

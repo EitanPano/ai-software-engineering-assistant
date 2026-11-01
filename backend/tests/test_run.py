@@ -1,4 +1,5 @@
 import asyncio
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -69,6 +70,27 @@ class TestRunEvent:
                     "output": "",
                 }
             )
+
+
+class TestMcpServerUnavailableEvent:
+    base: ClassVar[dict[str, object]] = {
+        "type": "mcp_server_unavailable",
+        "sequence": 2,
+        "createdAt": "2026-10-30T00:00:00.000Z",
+    }
+
+    def test_carries_the_server_name(self) -> None:
+        event = TypeAdapter(RunEvent).validate_python({**self.base, "name": "knowledge"})
+
+        assert event.root.type == "mcp_server_unavailable"
+        assert event.model_dump(by_alias=True)["name"] == "knowledge"
+
+    def test_requires_the_name(self) -> None:
+        with pytest.raises(ValidationError):
+            TypeAdapter(RunEvent).validate_python(self.base)
+
+    def test_the_stored_type_exists(self) -> None:
+        assert RunEventType("mcp_server_unavailable") is RunEventType.mcp_server_unavailable
 
 
 class StoreBacked:

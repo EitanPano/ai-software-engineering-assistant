@@ -106,4 +106,13 @@ class TestTruncateStatement:
 
     def test_has_nothing_to_run_when_only_the_migration_record_is_there(self) -> None:
         assert truncate_statement(["schema_migration"]) is None
+        assert truncate_statement(["mcp_server", "tool_policy"]) is None
+
+    def test_keeps_the_seeded_mcp_configuration(self) -> None:
+        statement = truncate_statement(["mcp_server", "user", "tool_policy", "tool_call"])
+
+        assert statement is not None
+        assert (
+            statement.as_string() == 'truncate table "user", "tool_call" restart identity cascade'
+        )
         assert truncate_statement([]) is None

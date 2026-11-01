@@ -73,6 +73,8 @@ package with an `__init__.py`.
 ```
 src/app/
   main.py             `app.main:app` with the infra lifespan; runs uvicorn; imported by nothing
+  knowledge_main.py   `python -m app.knowledge_main`: the `knowledge` MCP server, `postgres` alone;
+                      imported by nothing (see The agent)
   server.py           `create_app()` and `app`; builds the app, never listens, attaches no infra
   openapi.py          builds, shapes and caches the contract; `--write` emits openapi.json
   config/             env.py · constants.py · cors.py · routes.py
@@ -82,15 +84,16 @@ src/app/
                       agent's runs; agent: the loop, a controller only; source: connected
                       repositories and their index; search: hybrid search over the ready
                       chunks, a controller only, the chunks being the source module's; see Search;
-                      eval: admin-run retrieval measurements, see Evals)
+                      eval: admin-run retrieval measurements, see Evals;
+                      mcp_server, tool_policy: controller and service, no route, see The agent)
   models/<name>/      interface · type · enums · constants (auth, session, user,
-                      conversation, run, source, search, eval)
+                      conversation, run, source, search, eval, mcp_server, tool_policy)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
                       asgi (helpers the ASGI middleware share)
                       rate_limit · auth · role (the gates)
   services/           logger.py · db.py · cache.py · session.py · event.py · anthropic.py · tool.py ·
-                      github.py · voyage.py · chunk.py · parse.py · parse_worker.py
+                      mcp.py · github.py · voyage.py · chunk.py · parse.py · parse_worker.py
     security/         crypto · jwt · cookies · otp
     communicate/      __init__.py · console · mail · sms · whatsapp · templates/
     utils/            error · openapi · clock · api_model · pagination · postgres_error · retrieval_metric (pure, no I/O)
@@ -98,7 +101,7 @@ src/app/
     jobs/             one file per background job: session_cleanup
     subscribers/      one file per event reaction: send_welcome, execute_run, index_source, execute_eval_run
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
-    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals)
+    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals), mcp_seed.py (restores the rows `0009-mcp-server.sql` seeds; the e2e preparation and the test reset call it. The one exception to "a script reaches a module only through its controller": it deletes from `tool_policy` and `mcp_server` through `services/db`, so it refuses unless `current_database()` ends in `_test` or `_e2e`)
     eval_cases/       the labelled case files the seed reads (click-8.5.0.json)
 tests/                mirrors src/app/ (a package throughout, so two test_x.py cannot clash)
 openapi.json          the committed contract, written by the `contract` command
@@ -278,6 +281,8 @@ or infra file joins the list.
 | `only the entry imports the server (openapi does, to write the contract)` | only `main.py`, tests and `openapi.py` import `server.py` |
 | `the parse worker imports nothing of the app` | `services/parse_worker.py` imports no module of the app, so `config/env.py` and every secret stay out of the child |
 | `only the parse worker imports tree-sitter` | `tree_sitter` and its grammars are imported by `services/parse_worker.py` alone |
+| `only services mcp imports the MCP SDK` | `mcp` and `mcp_types` are imported by `services/mcp.py` alone (the parse worker's list also forbids it) |
+| `the knowledge entry stays an entry` | `knowledge_main.py` imports no `main`, `server`, middleware, routes, bus, scheduler, cache store or module data layer; `app.main` and `app.knowledge_main` share the top layer and the entry contracts |
 
 Module privacy is one point stricter than a type-aware linter: import-linter cannot tell a
 type-only import, so a module's `routes`, `service` and `model` never import another module's
@@ -390,13 +395,49 @@ changes only by plan.
   409), stores the message and publishes `run.created`; `infra/subscribers/execute_run.py` calls
   `api/agent/controller.py › execute_run`, the hand-written loop. Every step is a `run_event`,
   appended through one writer per run so sequences commit in order; the stream polls the table.
-- `services/anthropic.py` is the only importer of the SDK; `services/tool.py` is the default-deny
-  seam (its registry is empty in production). A run lost with its process ends as `interrupted` in
-  `sweep_lost_runs` (`infra/dependency.py`), called by `main.py`'s lifespan once every resource is
-  connected.
+- `services/anthropic.py` is the only importer of the SDK; `services/mcp.py` the only importer of
+  `mcp` (our client and the `knowledge` server, Streamable HTTP, never Anthropic's connector);
+  `services/tool.py` is the default-deny seam (`decide`: only an `allow` policy row runs, so no
+  row, `deny` and `ask` all refuse; `validate_input` checks a call against the JSON Schema it was
+  offered with, naming fields and never values). A run lost with its process ends as
+  `interrupted` in `sweep_lost_runs` (`infra/dependency.py`), called by `main.py`'s lifespan once
+  every resource is connected.
+- Tools. `execute_run` writes `run_started`, then `api/mcp_server/controller.py ›
+  discover_tools` lists every enabled server concurrently (one session per list, in a task of its
+  own, `MCP.list_seconds`), keeps each good listing on its `mcp_server` row and writes one
+  `mcp_server_unavailable` event for each server that did not answer, whose last good listing is
+  offered instead. The model sees `<server>__<tool>`, strict, sorted. `knowledge`'s URL and token
+  are `KNOWLEDGE_MCP_URL` and `KNOWLEDGE_MCP_TOKEN`, never a row's (its `url` is null); any other
+  row has a `url` and is sent no token. A call runs policy (`tool_policy`, read at each call, so a
+  stored definition never outranks it), then the schema of the definition the conversation was
+  offered, then the server (`MCP.call_seconds`), and is recorded as a `tool_call` (arguments,
+  result, status; `mcp_server_id` and `tool_name` name the server row that owns the name (enabled or not) and the tool's own name; with no such row the id is null and `tool_name` is the model's name). A run spends at
+  most `AGENT_TOOL_CALLS_PER_RUN` calls, counted from its `tool_call` rows before the turn's calls
+  start; the rest are a fixed `is_error` result and no server call. An input holding NUL fails the
+  run (JSONB cannot store it) before anything is started.
+- The prefix. `conversation.system_prompt` and `conversation.tool_definition` are written once at a
+  conversation's first run (a conditional update, then read back, so every request sends the same
+  bytes) and replayed: a thinking block is bound to `system`, `tools` and every earlier message,
+  and `thinking.block_binding.prefix_mismatch_behavior` is `"error"` so an edit is loud. A
+  conversation with stored turns before `0009` keeps the Base prompt and no tools, so it never
+  searches. `AGENT_SYSTEM_PROMPT` therefore reaches new conversations only.
+- `knowledge` (`app.knowledge_main`, the `knowledge` Compose service, port 8001, no published
+  port; by hand `uv run poe knowledge` sets `PORT=8001` and binds loopback outside production): `POST /mcp` with `Authorization: Bearer <KNOWLEDGE_MCP_TOKEN>` (constant-time compare,
+  else 401), `GET /health` 200 with no token and no store. Stateless, the `Host` header checked
+  against `knowledge:*` and loopback. It connects `postgres` alone: no bus, scheduler or sweep (a
+  second sweep would end the API's live runs). `APP_PROCESS=knowledge` needs only `DATABASE_URL`,
+  `VOYAGE_API_KEY` and `KNOWLEDGE_MCP_TOKEN`; `load_env` fills the other secrets with per-boot
+  random values. `APP_PROCESS` is required in production (`backend` or `knowledge`). Its one tool,
+  `search`, is `search_for_tool` (see Search).
 - Tests run on `tests/fake_anthropic.py`, a scripted fake of `POST /v1/messages` (markers in the
-  user's message pick the script; `python -m tests.fake_anthropic` serves it on 8101 for e2e, and
+  user's message pick the script, `[[research]]` searches twice and cites; it refuses a `strict`
+  schema the API would; `python -m tests.fake_anthropic` serves it on 8101 for e2e, and
   `ANTHROPIC_BASE_URL` points the API at it). `tests/agent_support.py` reaches it in process.
+  `tests/fake_mcp.py` serves the real `knowledge` and a scripted `lab` server in process through
+  `services/mcp.py › use_transport`; a host that is not served answers 503, which is "down".
+  `tests/knowledge_support.py` calls `knowledge` directly. The seeded `mcp_server` and
+  `tool_policy` rows survive `reset_store()` (restored from the migration's own statements by
+  `infra/scripts/mcp_seed.py`) and the e2e preparation.
 
 ## The source index
 
@@ -488,7 +529,17 @@ changes only by plan.
   to 10 pass across a boundary, which the pool of 10 connections holds at once. It bounds one
   account: many accounts still reach the pool and Voyage's total, and a call to
   `search_knowledge_base` that is not this route (the `knowledge` MCP server, and an eval run, see
-  Evals) is not limited here.
+  Evals) is not limited here. What bounds the tool's caller instead: the loop spends at most
+  `AGENT_TOOL_CALLS_PER_RUN` (12) calls a run and `message_per_user` multiplies that; `knowledge`
+  runs `KNOWLEDGE.concurrent_searches` (4) at once, below its own pool of 10, and a search waits
+  `slot_wait_seconds` (5) for a slot, then fails `busy`; the tool takes no `limit`, so an answer
+  is at most `hit_limit` (10) whole hits within `output_max_chars` (18,000), under the loop's cut
+  of 20,000; and only the loop, holding the bearer token, can reach it. The cap sits in
+  `search_for_tool` (`api/search/controller.py`), not in `search_knowledge_base`, so `GET
+  /api/search` and an eval run meet no new bound. `search_for_tool(query=)` checks the query as
+  `SearchQuery` checks `q`, maps each hit field by field (no cosine, score or rank), reports
+  `omitted`, and fails with one fixed code: `invalid_query`, `busy` or `search_unavailable`; it
+  logs lengths and counts, never the query.
   `TestRateLimit` in `tests/test_search.py` counts from the constant, never a literal, and each
   caller holds one `headers`, because `member_bearer()` mints a new caller on every call.
 - Exported rules. `api/search/controller.py › search_knowledge_base(text=, limit=)` embeds the text

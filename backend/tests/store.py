@@ -1,5 +1,8 @@
 """The test seam over the store, as `src/app/services/db.py` is the seam in `src/`.
 
+`reset_store()` leaves `mcp_server` and `tool_policy` out of the truncate and restores them from
+the migration's own statements (`infra/scripts/mcp_seed.py`).
+
 A store-backed suite is marked `store_backed`; it resets and inspects the store only through the
 helpers here. In this variant the marker skips unless `DATABASE_URL` names a test database (a name
 ending in `_test`), so `check` runs without one and `testDb` (`tests/db/plugin.py`) points the
@@ -19,6 +22,7 @@ from psycopg import sql
 
 from app.config.env import env
 from app.infra.memory import memory
+from app.infra.scripts.mcp_seed import restore_seed
 from app.services.db import fetch_all, fetch_one, get_db
 from tests.db.plugin import TEST_SUFFIX, database_name
 
@@ -54,7 +58,7 @@ async def reset_store() -> None:
     tables = await fetch_all(
         _Table,
         "select tablename from pg_tables where schemaname = 'public' "
-        "and tablename <> 'schema_migration'",
+        "and tablename not in ('schema_migration', 'mcp_server', 'tool_policy')",
     )
     if tables:
         names = sql.SQL(", ").join(sql.Identifier(table.tablename) for table in tables)
@@ -62,6 +66,8 @@ async def reset_store() -> None:
             await connection.execute(
                 sql.SQL("truncate table {} restart identity cascade").format(names)
             )
+    # The migration's seeded MCP rows, restored: a test may edit or delete them.
+    await restore_seed()
     await memory.close()
 
 

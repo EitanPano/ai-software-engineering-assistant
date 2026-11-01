@@ -16,6 +16,16 @@ class HistoryTurn:
 
 
 @dataclass(frozen=True)
+class ConversationPrefix:
+    """What every request of a conversation starts with, frozen at its first run: a thinking block
+    is bound to `system`, `tools` and every earlier message, so a byte of change is a 400. The
+    tools are full definitions, as sent."""
+
+    system_prompt: str
+    tool_definition: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
 class NewTurn:
     """A turn to append: the role and its blocks, with the text the wire shows."""
 

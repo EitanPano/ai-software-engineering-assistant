@@ -319,6 +319,30 @@ describe('the conversation route', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
   })
 
+  it('shows a down tool server as a notice in the log and goes on to the answer', async () => {
+    stubApi({
+      ...ME,
+      'GET /api/conversation/c1': detail(run('running')),
+      'GET /api/conversation/c1/message': page([message('m1', 'user', 'Question')]),
+      'GET /api/run/r1/event': sse([
+        { type: 'run_started', sequence: 1, createdAt: at },
+        { type: 'mcp_server_unavailable', sequence: 2, createdAt: at, name: 'knowledge' },
+        { type: 'text_delta', sequence: 3, createdAt: at, text: 'Answer without tools.' },
+        { type: 'run_finished', sequence: 4, createdAt: at, status: 'completed', errorCode: null },
+      ]),
+    })
+
+    renderRoutes('/conversation/c1')
+
+    const log = await screen.findByRole('log', { name: 'Conversation history' })
+    const notice = await within(log).findByRole('alert')
+    expect(notice).toHaveTextContent('knowledge')
+    expect(notice).toHaveTextContent(/unavailable/i)
+    const answer = await within(log).findByText('Answer without tools.')
+    expect(notice.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByText(/didn't finish/)).not.toBeInTheDocument()
+  })
+
   it('sends a message and follows the new run', async () => {
     stubApi({
       ...ME,

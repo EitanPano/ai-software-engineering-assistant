@@ -1,6 +1,7 @@
 """`uv run poe e2e-db`: prepares the e2e database the browser suite runs against. It creates the
 database named by `E2E_DATABASE_URL` when it is missing, applies the migrations and empties every
-table but the migration record, so each run starts from the same state. It refuses any name that
+table but the migration record and the seeded MCP configuration (`mcp_server`, `tool_policy`), so
+each run starts from the same state. It refuses any name that
 does not end in `_e2e`: this script deletes rows, and a wrong URL must not reach real data.
 
 It reads `E2E_DATABASE_URL` itself, and sets `DATABASE_URL` to it before the first `app` import
@@ -24,6 +25,9 @@ DEFAULT_E2E_URL: Final = "postgres://app:app@127.0.0.1:5432/app_e2e"
 E2E_SUFFIX: Final = "_e2e"
 MAINTENANCE_DATABASE: Final = "postgres"
 MIGRATION_TABLE: Final = "schema_migration"
+# Configuration a migration seeds (the `knowledge` server and its policy) and no journey writes:
+# emptying it would leave the agent with no tool, and nothing would put it back.
+KEPT_TABLES: Final = frozenset({MIGRATION_TABLE, "mcp_server", "tool_policy"})
 CONNECT_TIMEOUT_SECONDS: Final = 5
 
 
@@ -71,8 +75,9 @@ def maintenance_url(url: str) -> str:
 
 
 def truncate_statement(tables: Sequence[str]) -> sql.Composed | None:
-    """One statement for every table but the migration record; `None` when there is none."""
-    names = [sql.Identifier(table) for table in tables if table != MIGRATION_TABLE]
+    """One statement for every table but the migration record and the seeded configuration;
+    `None` when there is none."""
+    names = [sql.Identifier(table) for table in tables if table not in KEPT_TABLES]
     if not names:
         return None
     return sql.SQL("truncate table {} restart identity cascade").format(sql.SQL(", ").join(names))
@@ -111,6 +116,7 @@ async def prepare(url: str) -> None:
     # Before the first import that reads the environment (see the module docstring).
     os.environ["DATABASE_URL"] = url
     from app.infra.postgres import postgres
+    from app.infra.scripts.mcp_seed import restore_seed
     from app.infra.scripts.migrate import migrate
     from app.services.db import fetch_all, fetch_one, get_db
     from app.services.logger import configure_logging, log
@@ -137,6 +143,8 @@ async def prepare(url: str) -> None:
         if statement is not None:
             async with get_db() as connection:
                 await connection.execute(statement)
+        # The seeded rows stay (not truncated); a listing a previous run stored is cleared.
+        await restore_seed()
         log.info("e2e database ready", {"database": name, "tables": len(tables)})
     finally:
         with contextlib.suppress(Exception):

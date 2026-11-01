@@ -84,7 +84,12 @@ class TestRunEventStream:
         assert stream["schema"] == {"$ref": "#/components/schemas/RunEvent"}
         variants = as_object(as_object(as_object(doc["components"])["schemas"])["RunEvent"])
         assert isinstance(variants["oneOf"], list)
-        assert len(variants["oneOf"]) == 5
+        assert len(variants["oneOf"]) == 6
+        names = {
+            as_object(as_object(as_object(v)["properties"])["type"]).get("const")
+            for v in variants["oneOf"]
+        }
+        assert "mcp_server_unavailable" in names
 
     def test_documents_the_last_event_id_header_and_the_errors(self) -> None:
         doc = build_openapi_document(app)
