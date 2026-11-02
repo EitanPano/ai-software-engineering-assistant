@@ -15,6 +15,7 @@ from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.request_log import RequestLogMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.static_files import SpaMount
+from app.middleware.trusted_host import TrustedHostMiddleware
 from app.openapi import openapi_document
 
 # The app, assembled in one place: middleware, the exception handlers, every module mounted under
@@ -41,12 +42,15 @@ def create_app(lifespan: Lifespan[FastAPI] | None = None, *, config: Env = env) 
 
     # `add_middleware` stacks in reverse, so this adds the innermost first; the resulting order,
     # outer to inner, is the one tests/test_server.py pins:
-    # security headers, CORS, request id, proxy, request log, body limit, head, catch-all.
+    # security headers, CORS, request id, proxy, request log, trusted host, body limit, head,
+    # catch-all.
     # No middleware raises: one that refuses a request sends the error envelope itself.
     app.add_middleware(CatchAllMiddleware)
     # HEAD is answered wherever GET is: runs the request as GET and drops the body.
     app.add_middleware(HeadMiddleware)
     app.add_middleware(BodyLimitMiddleware, max_bytes=MAX_BODY_BYTES)
+    # A foreign `Host` stops here, before any route, and still gets a request id and a log line.
+    app.add_middleware(TrustedHostMiddleware, allowed=config.allowed_hosts)
     # One log line per request.
     app.add_middleware(RequestLogMiddleware)
     # Behind a proxy, the client IP needs the configured hop count.

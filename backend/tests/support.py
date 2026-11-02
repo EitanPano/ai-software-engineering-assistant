@@ -49,10 +49,11 @@ async def http_client(
     peer: tuple[str, int] = ("127.0.0.1", 123),
     raise_app_exceptions: bool = True,
 ) -> AsyncIterator[httpx.AsyncClient]:
-    """An in-process client. `https://testserver` so a Secure cookie is sent; `peer` is the
-    socket address the app sees (the proxy tests set it)."""
+    """An in-process client. `https` so a Secure cookie is sent, `localhost` so the API's `Host`
+    check answers it as it answers a browser; `peer` is the socket address the app sees (the proxy
+    tests set it)."""
     transport = httpx.ASGITransport(app=app, client=peer, raise_app_exceptions=raise_app_exceptions)
-    async with httpx.AsyncClient(transport=transport, base_url="https://testserver") as client:
+    async with httpx.AsyncClient(transport=transport, base_url="https://localhost") as client:
         yield client
 
 

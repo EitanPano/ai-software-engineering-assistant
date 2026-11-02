@@ -86,9 +86,9 @@ class TestAStreamedHead:
             "raw_path": b"/stream",
             "query_string": b"",
             "root_path": "",
-            "headers": [],
+            "headers": [(b"host", b"localhost")],
             "client": ("127.0.0.1", 123),
-            "server": ("testserver", 443),
+            "server": ("localhost", 443),
         }
 
         async def receive() -> Message:

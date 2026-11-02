@@ -15,6 +15,7 @@ import base64
 import binascii
 import ipaddress
 import os
+import re
 import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -87,6 +88,7 @@ _DEVELOPMENT_DEFAULTS: Final = {
 # Docker Compose passes an unset `${VAR}` as an empty string; blank means unset.
 _BLANK_IS_UNSET: Final = (
     "CORS_ORIGINS",
+    "ALLOWED_HOSTS",
     "COOKIE_DOMAIN",
     "MAIL_FROM",
     "STATIC_DIR",
@@ -101,6 +103,8 @@ _BLANK_IS_UNSET: Final = (
     "GITHUB_MCP_PAT",
     "GITHUB_MCP_UPSTREAM_URL",
 )
+
+_HOST_NAME: Final = re.compile(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?")
 
 _MIN_SECRET_LENGTH: Final = 32
 type Secret = Annotated[str, Field(min_length=_MIN_SECRET_LENGTH)]
@@ -171,6 +175,19 @@ def _split_origins(value: object) -> object:
     return value
 
 
+def _split_hosts(value: object) -> object:
+    # Refused at boot: a URL or a port here would otherwise lock every request out at run time.
+    if not isinstance(value, str):
+        return value
+    names = tuple(name.strip().lower() for name in value.split(",") if name.strip() != "")
+    for name in names:
+        if _HOST_NAME.fullmatch(name) is None:
+            raise ValueError(
+                f"entry {name!r} is not a host name: no scheme, port, path or wildcard"
+            )
+    return names
+
+
 def _resolve_dir(value: Path | None) -> Path | None:
     return None if value is None else value.resolve()
 
@@ -204,6 +221,9 @@ class Env(BaseModel):
         TrustProxy, BeforeValidator(_parse_trust_proxy), AfterValidator(_check_trust_proxy)
     ] = False
     cors_origins: Annotated[tuple[str, ...] | None, BeforeValidator(_split_origins)] = None
+    # Names the API answers to beyond the loopback ones, which always pass
+    # (`middleware/trusted_host.py`). A public host lists its own, or every request is refused.
+    allowed_hosts: Annotated[tuple[str, ...], BeforeValidator(_split_hosts)] = ()
     # The built SPA to serve, resolved once to an absolute path; blank is unset and serves none.
     static_dir: Annotated[Path | None, AfterValidator(_resolve_dir)] = None
     jwt_access_secret: Secret

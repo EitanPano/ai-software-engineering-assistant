@@ -27,6 +27,8 @@ services:
       # Comma-separated browser origins allowed by CORS. Empty keeps it off, which is right while no
       # browser calls the API from another origin.
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Host names the API answers to besides the loopback ones; a public host lists its own.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
       # Scheduled jobs run on exactly one replica. The template itself runs as one instance
       # until the cache task (the cache, rate limits and the bus live in one process).
       JOBS_ENABLED: ${JOBS_ENABLED:-true}
@@ -48,7 +50,8 @@ services:
       GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN-}
     # Single, on loopback: the stack is built for local use and agent runs spend the owner's key, so
     # nothing else on the network reaches it. With TRUST_PROXY false no caller can choose its own
-    # client IP through X-Forwarded-For. A public host changes this line (README › Usage).
+    # client IP through X-Forwarded-For. A public host changes this line (README › Hosting it
+    # publicly).
     ports: [ "127.0.0.1:8000:8000" ]
     profiles: [ "app" ]
     # Without this, `up --wait` returns when the container starts, before uvicorn binds the port:

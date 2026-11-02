@@ -45,10 +45,11 @@ class TestTheEntryUnderABindFailure:
     """
 
     def test_exits_non_zero_names_the_port_and_never_says_listening(self) -> None:
-        # One wildcard listener on a free port blocks the entry's 0.0.0.0 bind on Linux and on
-        # Windows alike; a second, loopback listener on the same port would fail on Linux.
+        # A loopback listener on a free port blocks the entry's loopback bind on Linux and on
+        # Windows alike; a wildcard blocker would not on Windows, which lets a specific address
+        # share a port with a wildcard one.
         with socket.socket() as blocker:
-            blocker.bind(("0.0.0.0", 0))  # noqa: S104 the entry binds the wildcard
+            blocker.bind(("127.0.0.1", 0))
             blocker.listen()
             port = int(blocker.getsockname()[1])
             result = subprocess.run(
@@ -83,7 +84,6 @@ class TestUvicornOptions:
     def test_sets_the_flags_every_call_shares(self, reload: bool) -> None:
         options = uvicorn_options(reload=reload)
 
-        assert options["host"] == "0.0.0.0"  # noqa: S104 the container listens on every interface
         assert options["port"] == 8000
         assert options["loop"] == "app.infra.loop:selector_loop_factory"
         assert options["server_header"] is False
@@ -100,6 +100,24 @@ class TestUvicornOptions:
         assert reloading.get("reload") is True
         assert reloading.get("reload_dirs") == ["src"]
 
+    @pytest.mark.parametrize("reload", [False, True])
+    def test_binds_loopback_outside_production(
+        self, monkeypatch: pytest.MonkeyPatch, reload: bool
+    ) -> None:
+        # The signing secrets default to public values here, so anyone who could reach the port
+        # could sign a token for any account.
+        from app.config.env import env
+
+        for app_env in ("development", "test"):
+            monkeypatch.setattr("app.main.env", env.model_copy(update={"app_env": app_env}))
+            assert uvicorn_options(reload=reload)["host"] == "127.0.0.1", app_env
+
+    def test_binds_every_interface_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.config.env import env
+
+        monkeypatch.setattr("app.main.env", env.model_copy(update={"app_env": "production"}))
+        assert uvicorn_options(reload=False)["host"] == "0.0.0.0"  # noqa: S104 the container
+
 
 class TestKnowledgeEntry:
     """`app.knowledge_main` copies `main.py`'s uvicorn flags, because nothing may import `main.py`;
@@ -112,9 +130,7 @@ class TestKnowledgeEntry:
         knowledge = dict(knowledge_options())
 
         assert api.keys() == knowledge.keys()
-        # `host` is the one exception: it has no credential but a public development token, so it
-        # listens on loopback outside production (see the tests below).
-        for name in api.keys() - {"port", "host"}:
+        for name in api.keys() - {"port"}:
             assert knowledge[name] == api[name], name
 
     def test_binds_loopback_outside_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,7 +191,7 @@ class TestGatewayEntry:
         gateway = dict(gateway_options())
 
         assert api.keys() == gateway.keys()
-        for name in api.keys() - {"port", "host"}:
+        for name in api.keys() - {"port"}:
             assert gateway[name] == api[name], name
 
     def test_binds_loopback_outside_production_and_every_interface_in_it(

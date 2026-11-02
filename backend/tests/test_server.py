@@ -15,6 +15,7 @@ from app.middleware.proxy import ProxyMiddleware
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.request_log import RequestLogMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.trusted_host import TrustedHostMiddleware
 from app.server import create_app
 from tests.probe import probe_app
 from tests.support import http_client
@@ -125,6 +126,7 @@ class TestTheMiddlewareOrder:
             RequestIdMiddleware,
             ProxyMiddleware,
             RequestLogMiddleware,
+            TrustedHostMiddleware,
             BodyLimitMiddleware,
             HeadMiddleware,
             CatchAllMiddleware,
@@ -137,6 +139,7 @@ class TestTheMiddlewareOrder:
             RequestIdMiddleware,
             ProxyMiddleware,
             RequestLogMiddleware,
+            TrustedHostMiddleware,
             BodyLimitMiddleware,
             HeadMiddleware,
             CatchAllMiddleware,

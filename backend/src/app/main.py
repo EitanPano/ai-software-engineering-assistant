@@ -10,7 +10,7 @@ ends the lifespan, whose disconnect has one 4 s budget (`infra/dependency.py`).
 
 There is no `listening` line of our own. uvicorn runs the lifespan *before* it binds the port, so a
 line logged there would claim a listener that a failed bind then disproves; uvicorn's own
-`Uvicorn running on http://0.0.0.0:<port>` is logged only after the bind succeeds.
+`Uvicorn running on http://<host>:<port>` is logged only after the bind succeeds.
 """
 
 import sys
@@ -79,8 +79,10 @@ def uvicorn_options(*, reload: bool) -> UvicornOptions:
     - no uvicorn log config: `services/logger.py` configures the root logger.
     """
     options: UvicornOptions = {
-        # The container listens on every interface; Compose publishes it on loopback only.
-        "host": "0.0.0.0",  # noqa: S104
+        # Outside production the signing secrets default to public values, so only loopback may
+        # reach it. The production container listens on every interface; Compose publishes it on
+        # loopback only.
+        "host": "0.0.0.0" if env.app_env == "production" else "127.0.0.1",  # noqa: S104
         "port": env.port,
         "loop": _LOOP,
         "server_header": False,
