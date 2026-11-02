@@ -1,6 +1,7 @@
-# Both stages use the same python tag: the venv's `python` is a symlink into the base image.
-FROM python:3.14-slim AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /uvx /bin/
+# Both stages use the same python image: the venv's `python` is a symlink into the base image.
+# Every image is pinned by digest, with its tag beside it (.doc/conventions.md, CI).
+FROM python:3.14-slim@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966 AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.13@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 /uv /uvx /bin/
 # The image installs Python packages only: uv never downloads an interpreter, and compiles
 # bytecode once, here, so the non-root user needs to write nothing at runtime.
 ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1
@@ -11,7 +12,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
 
-FROM python:3.14-slim
+FROM python:3.14-slim@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
 RUN useradd --system --uid 10001 --no-create-home app
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
