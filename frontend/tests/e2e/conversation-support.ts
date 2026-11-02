@@ -15,6 +15,8 @@ export const MARKER = {
   research: '[[research]]',
   // The run fails with `refused`.
   refuse: '[[refuse]]',
+  // An answer whose links try to hide where they go (backend/tests/fake_anthropic.py).
+  links: '[[links]]',
   // A `github__add_issue_comment` call at `ask` whose body runs past a screen, then "Tool done."
   // (backend/tests/fake_anthropic.py, served by the fake GitHub MCP server).
   githubComment: '[[github_comment]]',

@@ -22,6 +22,7 @@ apart. A marker is `[[name]]` or `[[name:key]]`:
 - `[[stop_sequence]]`, `[[context_limit]]`, `[[unknown_stop]]`: those stop reasons
   (`stop_sequence`, `model_context_window_exceeded`, and one the API does not define).
 - `[[empty]]`: `end_turn` with no content at all.
+- `[[links]]`: an answer whose links try to hide where they go (`LINK_CHUNKS`).
 - `[[parallel]]`: the first call asks for two tools (`lab__first` and `lab__second`) in one turn.
 - `[[trio]]`: the first call asks for `lab__echo`, `lab__lookup` and `lab__loose`, in that order.
 - `[[github_comment]]`: asks for `github__add_issue_comment` with a valid input whose `body` is 60
@@ -96,6 +97,18 @@ MARKER: Final = re.compile(r"\[\[([a-z_]+)(?::([A-Za-z0-9_-]+))?\]\]")
 FACT_MARKER: Final = re.compile(r"\[\[fact:(.+?)\]\]", re.DOTALL)
 ANSWER_CHUNKS: Final = ("Hello! ", "This is the **scripted** answer.\n\n", "- one\n", "- two\n")
 HOLD_CHUNKS: Final = ("The first part. ", "The rest, **done**.")
+# A steered answer. Each link hides where it goes in a way only a browser's layout can show: a
+# direction override in its words, or before a bare URL that then reads as GitHub's, a label long
+# enough to push what follows off the screen, a first column that cuts a table at its edge. Built
+# from a code point, so no invisible character lives in this file.
+_OVERRIDE: Final = chr(0x202E)
+LINK_CHUNKS: Final = (
+    f"See [the docs{_OVERRIDE}](https://moc.buhtig.se/?d=secret) next.\n\n",
+    f"{_OVERRIDE}https://evil.example/moc.buhtig//:sptth\n\n",
+    "[a long label" + " word" * 600 + "](https://far.example/)\n\n",
+    "| A | B |\n| --- | --- |\n",
+    f"| {'x' * 92} | [in a table](https://github.com.evil.example/?d=x) |\n",
+)
 TOOL_DONE: Final = "Tool done."
 # `[[research]]` searches the fixture repository twice (the second query is a keyword the first
 # answer does not hold), then cites the last result.
@@ -757,6 +770,8 @@ async def script(
         for part in _message_end("end_turn"):
             yield part
         return
+    elif "links" in marks:
+        chunks = LINK_CHUNKS
     else:
         chunks = ANSWER_CHUNKS
     async for part in _chunks(index, chunks):
