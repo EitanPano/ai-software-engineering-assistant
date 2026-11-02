@@ -1238,7 +1238,8 @@ environment:
 # (the other service keys stay)
 # Single, on loopback: the stack is built for local use and agent runs spend the owner's key, so
 # nothing else on the network reaches it. With TRUST_PROXY false no caller can choose its own
-# client IP through X-Forwarded-For. A public host changes this line (README › Usage).
+# client IP through X-Forwarded-For. A public host changes this line (README › Hosting it
+# publicly).
 ports: ["127.0.0.1:8000:8000"]
 ```
 

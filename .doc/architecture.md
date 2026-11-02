@@ -237,6 +237,14 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-11-02: hardening before the first merge to `main`, from a whole-codebase audit
+  (`.orchestrate/audit-identity`, `audit-agent`, `audit-platform`). The API listens on loopback
+  outside production, as `knowledge` and the gateway do, because its signing secrets default to
+  public values there. Every request passes `middleware/trusted_host.py`, which answers a `Host`
+  that is neither a loopback name nor in the new `ALLOWED_HOSTS` with a 400, so a DNS-rebinding page
+  cannot reach the API or the app's files. In assistant text every link or image that leaves the
+  app shows its real host first, in one `bdi` with the link, and only http, https and relative URLs
+  stay links. Both Dockerfiles pin every image by digest.
 - 2026-11-02: the agent remembers across conversations. New routes, owner only, another user's
   record a 404, an admin's included: `GET /api/memory` and `DELETE /api/memory/{id}`. Table `memory`
   (`0012-memory.sql`), with no vector index. `knowledge` gains `recall`, at `allow`, which reads one
