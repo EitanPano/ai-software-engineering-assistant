@@ -176,6 +176,7 @@ class TestTools(StoreBacked):
         assert frames[1].event["toolUseId"] == frames[2].event["toolUseId"]
         first, second = fake_model.requests
         assert [d["name"] for d in first["tools"]] == [  # type: ignore[attr-defined]
+            "knowledge__recall",
             "knowledge__search",
             "lab__boom",
             "lab__echo",

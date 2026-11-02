@@ -75,14 +75,19 @@ def _semaphore() -> asyncio.Semaphore:
     return held[1]
 
 
+class ToolBusy(Exception):  # noqa: N818  # named for what the tool reports
+    """No slot came free within `slot_wait_seconds`; the tool answers `busy`."""
+
+
 @asynccontextmanager
-async def _slot() -> AsyncIterator[None]:
-    """One of the tool's concurrent searches: waits `slot_wait_seconds`, then `busy`."""
+async def tool_slot() -> AsyncIterator[None]:
+    """One of the `knowledge` server's concurrent tool calls, shared by `search` and `recall` so
+    the pool stays bounded: waits `slot_wait_seconds`, then `ToolBusy`."""
     semaphore = _semaphore()
     try:
         await asyncio.wait_for(semaphore.acquire(), KNOWLEDGE.slot_wait_seconds)
     except TimeoutError:
-        raise ToolSearchFailed(ToolSearchCode.busy) from None
+        raise ToolBusy from None
     try:
         yield
     finally:
@@ -127,11 +132,14 @@ async def search_for_tool(*, query: str) -> str:
     failure is a `ToolSearchFailed` with one fixed code; the log carries lengths and counts, never
     the query."""
     text = _tool_query(query)
-    async with _slot():
-        try:
-            outcome = await search_knowledge_base(text=text, limit=KNOWLEDGE.hit_limit)
-        except AppError:
-            raise ToolSearchFailed(ToolSearchCode.search_unavailable) from None
+    try:
+        async with tool_slot():
+            try:
+                outcome = await search_knowledge_base(text=text, limit=KNOWLEDGE.hit_limit)
+            except AppError:
+                raise ToolSearchFailed(ToolSearchCode.search_unavailable) from None
+    except ToolBusy:
+        raise ToolSearchFailed(ToolSearchCode.busy) from None
     hits = [_tool_hit(record) for record in outcome.hits[: KNOWLEDGE.hit_limit]]
     kept = len(hits)
     while (

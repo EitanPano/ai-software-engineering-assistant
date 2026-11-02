@@ -5,22 +5,26 @@ it, not the server.
 
 The request follows `.doc/conventions.md` (Claude API): the model comes from `LLM_MODEL`,
 `thinking` is adaptive with an erroring block binding, `effort` is explicit, there are no
-sampling parameters and no forced `tool_choice`, the server-side `fallbacks` parameter is sent,
-and a top-level `cache_control` caches the prefix.
+sampling parameters and no forced `tool_choice`, the server-side `fallbacks` parameter is sent on
+a run's stream (`parse_turn`'s side call sends none: a refused side call only stores nothing), and a
+top-level `cache_control` caches the prefix.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Final, cast
+from typing import Final, Literal, cast
 
 import anthropic
 import httpx2
-from anthropic import AsyncAnthropic
-from anthropic.types.beta import BetaMessageParam, BetaToolUnionParam
+from anthropic import AsyncAnthropic, transform_schema
+from anthropic.types.beta import BetaMessage, BetaMessageParam, BetaToolUnionParam
+from pydantic import BaseModel, ValidationError
 
-from app.config.constants import AGENT_EFFORT, AGENT_MAX_TOKENS
+from app.config.constants import AGENT_EFFORT, AGENT_MAX_TOKENS, SIDE_CALL
 from app.config.env import env
 from app.models.conversation.type import HistoryTurn
+from app.services.logger import log
 
 FALLBACK_BETA: Final = "server-side-fallback-2026-07-01"
 BINDING_BETA: Final = "thinking-binding-controls-2026-08-01"
@@ -35,6 +39,23 @@ class ModelUnavailable(Exception):  # noqa: N818  # named for what the run repor
 class InvalidModelOutput(Exception):  # noqa: N818  # named for what the model produced
     """The stream carried something the SDK could not read (a tool input that is not JSON). It has
     no message and no cause: the SDK's own text holds the raw input, which must reach no log."""
+
+
+class SideCallFailed(Exception):  # noqa: N818  # named for what the caller reports
+    """A side call produced no usable answer. No message and no cause: the model's text and the
+    SDK's validation error hold the person's words, which must reach no log."""
+
+
+class SideCallRefused(SideCallFailed):
+    """The model declined (`stop_reason: refusal`). Not retried."""
+
+
+class SideCallCutOff(SideCallFailed):
+    """The answer stopped at a limit (`max_tokens`, the context window). Not retried."""
+
+
+class SideCallInvalid(SideCallFailed):
+    """The served text was not the requested shape, twice."""
 
 
 @dataclass(frozen=True)
@@ -121,6 +142,102 @@ def _messages(history: Sequence[HistoryTurn]) -> list[BetaMessageParam]:
     return cast("list[BetaMessageParam]", turns)
 
 
+@asynccontextmanager
+async def _unavailable_as_error() -> AsyncIterator[None]:
+    """The transport chain of every model call: connection failures, timeouts, throttling and
+    server errors surface as `ModelUnavailable`; anything else (a rejected request) propagates."""
+    try:
+        yield
+    except (
+        # The SDK wraps transport errors only around the send; one raised while the body is read
+        # arrives raw.
+        httpx2.TransportError,
+        anthropic.APIConnectionError,
+        anthropic.RateLimitError,
+        anthropic.InternalServerError,
+    ) as error:
+        # Chained for the server log; the run reports only `upstream_unavailable`.
+        raise ModelUnavailable from error
+    except anthropic.APIStatusError as error:
+        # A 529, or an `error` event in the middle of a stream (the response status is 200 then).
+        if error.status_code >= 500 or _error_type(error.body) in _TRANSIENT_ERRORS:
+            raise ModelUnavailable from error
+        raise
+
+
+def _served_text(message: BetaMessage) -> str:
+    """The text the serving model wrote: the `text` blocks after the last `fallback` block."""
+    blocks: list[Block] = [block.to_dict() for block in message.content]
+    texts = [block.get("text") for block in served_blocks(blocks) if block.get("type") == "text"]
+    return "".join(text for text in texts if isinstance(text, str))
+
+
+async def _side_call(
+    output_type: type[BaseModel], *, system: str, content: str, model: str, effort: str
+) -> str:
+    """One non-streaming call; returns the served text of an answer that ended normally."""
+    format_schema = transform_schema(output_type)
+    async with _unavailable_as_error():
+        message = await _client().beta.messages.create(
+            model=model,
+            max_tokens=SIDE_CALL.max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": content}],
+            # No `thinking` (the model's default applies), no `cache_control` (the prefix is under
+            # the minimum), and never `fallbacks`: a refused side call only stores nothing.
+            output_config={
+                "effort": cast("Literal['low', 'medium', 'high']", effort),
+                "format": {"type": "json_schema", "schema": format_schema},
+            },
+            timeout=SIDE_CALL.timeout_seconds,
+        )
+    usage = message.usage
+    log.info(
+        "side call",
+        {
+            "model": model,
+            "usage_in": usage.input_tokens,
+            "usage_out": usage.output_tokens,
+            "cache_write": usage.cache_creation_input_tokens or 0,
+            "cache_read": usage.cache_read_input_tokens or 0,
+        },
+    )
+    # `stop_reason` before any text: a refused or cut-off answer is never read.
+    match message.stop_reason:
+        case "end_turn" | "stop_sequence":
+            return _served_text(message)
+        case "max_tokens" | "model_context_window_exceeded":
+            raise SideCallCutOff
+        case _:
+            raise SideCallRefused
+
+
+async def parse_turn[T: BaseModel](
+    output_type: type[T], *, system: str, content: str, model: str, effort: str
+) -> T:
+    """One non-streaming side call beside a run (memory extraction): `content` is the one user
+    message, `output_type` a Pydantic type the API is asked to produce through
+    `output_config.format` (the SDK's public `transform_schema` makes its schema acceptable), and
+    the result is validated here from the served text. Not `.parse()`: that validates every text
+    block inside the response parser, so a cut-off answer, or text before a `fallback` block,
+    would raise before `stop_reason` could be read, with the model's raw text in the error.
+
+    Nothing is written to `message`, no `block_binding` is sent and the log carries usage only.
+    A text that fails validation is asked for once more, then `SideCallInvalid`; a refusal or a cut
+    off is `SideCallRefused` or `SideCallCutOff`, not retried; transport failures are
+    `ModelUnavailable`. The errors carry no text and no cause."""
+    for attempt in (1, 2):
+        text = await _side_call(
+            output_type, system=system, content=content, model=model, effort=effort
+        )
+        try:
+            return output_type.model_validate_json(text)
+        except ValidationError:
+            if attempt == 2:
+                raise SideCallInvalid from None
+    raise SideCallInvalid
+
+
 async def count_tokens(tools: Sequence[dict[str, object]], *, system: str) -> int:
     """The input tokens of `system` and `tools` alone, from the free token-counting endpoint (no
     model turn is billed). `tests/live_github.py` uses it to see whether the API accepts a tool
@@ -149,43 +266,31 @@ async def stream_turn(
     Connection failures, timeouts, throttling and server errors surface as `ModelUnavailable`;
     anything else (a rejected request) propagates and the run ends as `internal`."""
     try:
-        async with _client().beta.messages.stream(
-            model=env.llm_model,
-            max_tokens=AGENT_MAX_TOKENS,
-            system=system,
-            messages=_messages(history),
-            tools=cast("list[BetaToolUnionParam]", list(tools)) if tools else anthropic.omit,
-            thinking={
-                "type": "adaptive",
-                "block_binding": {"prefix_mismatch_behavior": "error"},
-            },
-            output_config={"effort": AGENT_EFFORT},
-            cache_control={"type": "ephemeral"},
-            fallbacks="default",
-            betas=[FALLBACK_BETA, BINDING_BETA],
-        ) as stream:
+        async with (
+            _unavailable_as_error(),
+            _client().beta.messages.stream(
+                model=env.llm_model,
+                max_tokens=AGENT_MAX_TOKENS,
+                system=system,
+                messages=_messages(history),
+                tools=cast("list[BetaToolUnionParam]", list(tools)) if tools else anthropic.omit,
+                thinking={
+                    "type": "adaptive",
+                    "block_binding": {"prefix_mismatch_behavior": "error"},
+                },
+                output_config={"effort": AGENT_EFFORT},
+                cache_control={"type": "ephemeral"},
+                fallbacks="default",
+                betas=[FALLBACK_BETA, BINDING_BETA],
+            ) as stream,
+        ):
             async for text in stream.text_stream:
                 await on_text(text)
             message = await stream.get_final_message()
-    except (
-        # The SDK wraps transport errors only around the send; one raised while the body is read
-        # arrives raw.
-        httpx2.TransportError,
-        anthropic.APIConnectionError,
-        anthropic.RateLimitError,
-        anthropic.InternalServerError,
-    ) as error:
-        # Chained for the server log; the run reports only `upstream_unavailable`.
-        raise ModelUnavailable from error
     except ValueError:
         # The SDK's message for a tool input that is not JSON holds the raw input (a search query),
         # which no log may carry: nothing of it is chained.
         raise InvalidModelOutput from None
-    except anthropic.APIStatusError as error:
-        # A 529, or an `error` event in the middle of a stream (the response status is 200 then).
-        if error.status_code >= 500 or _error_type(error.body) in _TRANSIENT_ERRORS:
-            raise ModelUnavailable from error
-        raise
     content: list[Block] = [
         # A `tool_use` input that is not an object makes the serializer warn (an error under the
         # test configuration); it is kept as the model sent it and the loop fails the run on it

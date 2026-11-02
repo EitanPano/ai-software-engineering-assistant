@@ -44,6 +44,10 @@ docs use these words and no synonyms. Add a term here before using it anywhere e
 | hybrid search | Semantic and keyword search fused with reciprocal rank fusion (RRF) | module `search`, route `/api/search` |
 | search hit | One chunk a search returns, with its repository, file, line range and ranks | `SearchHit`, `entity/chunk` |
 | memory | Long-term knowledge about a user, distinct from conversation history | table `memory`, route `/api/memory`, module `memory` |
+| recall | Read a person's own memories for a text; a tool on `knowledge`, which never writes | tool `knowledge__recall`, `recall_for_tool` |
+| extraction | A side call that reads one completed run's `user` message and stores the durable facts it states | `extract_memory`, `MemoryExtraction` |
+| side call | One non-streaming model request outside any conversation: a Pydantic type in, a validated instance out, nothing stored in `message` | `services/anthropic.py › parse_turn`, `LLM_SIDE_MODEL` |
+| delete | Remove an entity its owner holds, for good | `feature/delete-memory` |
 | eval case | One labelled question, of a kind, pinned to a commit; the correctness task adds its expected answer | table `eval_case` |
 | expected chunk | A label: lines of one file at a pinned commit that a good answer must contain; never a chunk id | `EvalExpectedChunk`, column `eval_case.expected_chunk` |
 | identifier, paraphrase, no_answer | The kinds of eval case: names a symbol; shares no identifier with its lines; cannot be answered from the corpus, so it enters no mean, only the cosine evidence | column `eval_case.kind` |

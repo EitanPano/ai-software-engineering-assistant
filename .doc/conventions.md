@@ -41,7 +41,7 @@ needs a reason in its plan.
 | --- | --- | --- |
 | Agent loop | `anthropic` SDK, a hand-written loop | LangChain, LangGraph, LlamaIndex, Tool Runner, Managed Agents: an approval must pause a run durably, and this loop is what the project demonstrates |
 | MCP | The official `mcp` Python SDK, for our client and the `knowledge` server, on Streamable HTTP; GitHub's own server behind our GitHub gateway | Anthropic's MCP connector: its tool calls run where the approval gate cannot intercept them |
-| Structured outputs | Pydantic models through `output_config.format` (`client.messages.parse()`), `strict: true` on `knowledge`'s tool; a third-party tool is sent as accepted, because its schema does not meet `strict`'s rules and a rewrite would send what no admin accepted, and `validate_input` checks every input | Parsing JSON out of text |
+| Structured outputs | Pydantic models through `output_config.format`, the schema from the SDK's `transform_schema` and the served text validated by `services/anthropic.py › parse_turn`, not `messages.parse()`, which validates inside its response parser, before `stop_reason` can be read, and raises an error that carries raw model text; `strict: true` on `knowledge`'s tools; a third-party tool is sent as accepted, because its schema does not meet `strict`'s rules and a rewrite would send what no admin accepted, and `validate_input` checks every input | Parsing JSON out of text |
 | Streaming | FastAPI's `fastapi.sse` and the generated client's SSE support | WebSockets: the stream is one-way. `sse-starlette`: FastAPI ships it |
 | Vectors | `pgvector` with `halfvec` and HNSW | A separate vector database |
 | Keyword search | Postgres full-text search and `pg_trgm`, fused by RRF in SQL | A search engine; a BM25 extension unless the retrieval evals justify its custom image |
@@ -56,14 +56,16 @@ needs a reason in its plan.
 All LLM code follows the `claude-api` skill; read it before touching the agent, because its
 current API outranks what you remember. The traps:
 
-- The model comes from `LLM_MODEL`, default `claude-opus-5-5`, with no date suffix.
+- The model comes from `LLM_MODEL`, default `claude-opus-5-5`, with no date suffix. A side call
+  takes `LLM_SIDE_MODEL`, default `claude-haiku-5-5`, and sends no `fallbacks`, because Haiku has
+  none and a refused side call only stores nothing.
 - Omit `thinking` or send `{type: "adaptive"}`, and set `output_config.effort` explicitly.
   `budget_tokens`, `temperature`, `top_p`, `top_k` and a forced `tool_choice` return 400; use
   `auto` with `strict: true`.
 - Append `response.content` unchanged and never edit stored history: thinking blocks are bound to
   it. Store blocks as JSONB, not as extracted text.
 - Check `stop_reason` before reading content: `tool_use`, `max_tokens`, `pause_turn`, `refusal`.
-  Send the server-side `fallbacks` parameter.
+  Send the server-side `fallbacks` parameter on a conversation's turn.
 - A streaming tool sets `eager_input_streaming: true`, so validate every tool input against its
   schema before executing it, and treat a failure as invalid JSON.
 - Parallel tool calls run concurrently and return in one user message; a failure is a
@@ -88,6 +90,9 @@ calls.
   gateway's process: GitHub's server takes it per request and stores it nowhere.
 - Assistant text and repository content render as sanitised Markdown, never raw HTML.
 - No tool executes code in v1.
+- Open until a route adds a third-party server: a tool at `allow` there can receive a recalled fact
+  with no person in view, because only `github` is capped. That plan decides whether such a tool
+  holds at `ask` once a run has called `recall`.
 
 ## Tests and evals
 

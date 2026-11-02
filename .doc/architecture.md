@@ -15,7 +15,7 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
 | `backend/` | HTTP API, validation, business rules, persistence; serves the SPA's files in `single` | The server's container; port in `.fullstack/catalog.yaml` |
 | Stack | The packages and their templates | `react-python-fastapi`: `backend/` from `server/python-fastapi` 1.2.1, `frontend/` from `frontend/react` 2.1.1. A single-page app, because no public page needs search or sharing |
 | Data store | System of record | Compose service `database`, port 5432 on loopback |
-| `knowledge` MCP server | Our own MCP server: one tool, `search`, over the knowledge base, on Streamable HTTP. A `read` tool is planned | Its own Compose service, from the `backend/` image with a different command; no published port |
+| `knowledge` MCP server | Our own MCP server, on Streamable HTTP: `search` over the knowledge base, and `recall` over one person's memories, by a caller carried in `_meta`. A `read` tool is planned | Its own Compose service, from the `backend/` image with a different command; no published port |
 | GitHub MCP server | GitHub's official MCP server, limited to seven tools: the agent's GitHub tools, write tools behind approval. It holds no token and takes one per request | Compose service `github-mcp`, by digest, under the `github` profile; port 8082 on loopback |
 | GitHub gateway | Our process in front of GitHub's server: the only one that holds the GitHub token, checks a bearer token and adds the PAT to each forwarded request | Compose service `github-gateway`, from the `backend/` image with a different command, under the `github` profile; no published port |
 
@@ -78,8 +78,11 @@ Fill every `<!-- FILL: … -->` marker before the first plan that touches the se
     `/search`; the agent reaches it only through the `knowledge` MCP server and decides when to
     search again.
 12. Memory: `message` rows are one conversation's history. `memory` rows are per-user long-term
-    knowledge, extracted after a conversation and retrieved by the agent; the user can list and
-    delete them.
+    knowledge. After a completed run a bus reaction runs extraction, a side call over that run's
+    `user` message alone, and stores what it finds, embedded; a failure touches nothing. The agent
+    reads them through `recall`, in a tool result, when it decides to, and a person lists and
+    deletes theirs at `/memory`. A delete stops recall at once; a conversation that already read
+    the memory keeps it, because stored history is never edited.
 13. Eval run: an admin's click stores a `queued` `eval_run`, and a bus reaction executes it beside
     the request, one at a time, through `search_knowledge_base`, the rule the route's limit does
     not reach. A case runs only against a `ready` source at its pinned commit. Scores are stored per
@@ -129,7 +132,8 @@ Planned; each task's migration creates its tables and the code wins on conflict.
 - `document`: `source`; path, language.
 - `chunk`: `document`; symbol, line range, content, embedding, and the stored `keyword` that
   full-text search reads.
-- `memory`: owner `user`; content, embedding, originating `conversation`.
+- `memory`: owner `user`; content, embedding, originating `conversation`. No vector index: a recall
+  is an exact scan of one person's rows, at most 1,000.
 - `eval_case`: pinned commit, kind, question, expected chunks; the correctness task adds the
   expected answer.
 - `eval_run`: status, error code, counts, scores, per-case results, cosine evidence, corpus and
@@ -189,7 +193,7 @@ None in the template. A vendor goes in `services/<vendor>` and is selected by
 
 | Service | Wrapped in | Configured by |
 | --- | --- | --- |
-| Anthropic API (`claude-opus-5-5`; the agent, memory extraction and the eval judge) | `services/anthropic` | `ANTHROPIC_API_KEY`, `LLM_MODEL`; `ANTHROPIC_BASE_URL` points tests at the fake and is refused in production |
+| Anthropic API (`claude-opus-5-5` for the agent; `claude-haiku-5-5` for side calls, memory extraction and the eval judge) | `services/anthropic` | `ANTHROPIC_API_KEY`, `LLM_MODEL`, `LLM_SIDE_MODEL`; `ANTHROPIC_BASE_URL` points tests at the fake and is refused in production |
 | Voyage AI embeddings (`voyage-code-4`) | `services/voyage` | `VOYAGE_API_KEY`; `VOYAGE_BASE_URL` for the fake, refused in production |
 | GitHub's public REST API, anonymous, 60 requests an hour per server address | `services/github` | `GITHUB_BASE_URL` for the fake, refused in production |
 | GitHub MCP server, `ghcr.io/github/github-mcp-server` `v2.0.3` by digest; opt-in | the MCP client, as an `mcp_server` row, through the GitHub gateway | `GITHUB_MCP_PAT`, held by the gateway alone; `GITHUB_MCP_TOKEN` between the backend and the gateway |
@@ -233,6 +237,14 @@ key; only eval runs exercise the real model.
 Date-stamped notes for architecture changes: new routes, auth boundaries, data-model
 changes, external dependencies. Newest first.
 
+- 2026-11-02: the agent remembers across conversations. New routes, owner only, another user's
+  record a 404, an admin's included: `GET /api/memory` and `DELETE /api/memory/{id}`. Table `memory`
+  (`0012-memory.sql`), with no vector index. `knowledge` gains `recall`, at `allow`, which reads one
+  person's rows by `_meta["assistant.knowledge/user_id"]`, sent from `run.user_id` to `knowledge`
+  alone and outside the model's arguments, so its bearer token now guards every person's memories.
+  `services/anthropic.py › parse_turn` is the first side call, on `LLM_SIDE_MODEL`, default
+  `claude-haiku-5-5`. A bus reaction on `run.completed` runs extraction over that run's `user`
+  message. Memory text now goes to Voyage AI.
 - 2026-11-02: an admin manages MCP servers and tool policy, the first admin control over the tool
   gate. New routes, each `require_role(admin)` and rechecked in its handler: `GET /api/mcp-server`,
   `GET` and `PATCH /api/mcp-server/{id}`, `GET /api/mcp-server/{id}/listing`,

@@ -161,7 +161,27 @@ class TestTheDocument:
             "/api/mcp-server/{id}/acceptance": {"post"},
             "/api/tool-policy/{mcpServerId}": {"get"},
             "/api/tool-policy/{mcpServerId}/{toolName}": {"put"},
+            "/api/memory": {"get"},
+            "/api/memory/{id}": {"delete"},
         }
+
+    def test_documents_the_memory_routes_with_their_errors(self) -> None:
+        doc = build_openapi_document(app)
+
+        paths = as_object(doc["paths"])
+        listing = as_object(as_object(paths["/api/memory"])["get"])
+        assert set(as_object(listing["responses"])) == {"200", "400", "401", "500"}
+        delete = as_object(as_object(paths["/api/memory/{id}"])["delete"])
+        assert set(as_object(delete["responses"])) == {"204", "400", "401", "404", "500"}
+        assert "content" not in as_object(as_object(delete["responses"])["204"])
+        schemas = as_object(as_object(doc["components"])["schemas"])
+        assert names(as_object(schemas["Memory"])["required"]) == {
+            "id",
+            "content",
+            "conversationId",
+            "createdAt",
+        }
+        assert names(as_object(schemas["MemoryPage"])["required"]) == {"items", "nextCursor"}
 
     def test_documents_the_user_list_query_and_its_page_component(self) -> None:
         doc = build_openapi_document(app)
@@ -319,6 +339,8 @@ class TestTheShaping:
                 "ToolPolicy",
                 "ToolPolicySet",
                 "SetToolPolicyBody",
+                "Memory",
+                "MemoryPage",
             }
         )
 

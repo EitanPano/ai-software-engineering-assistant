@@ -444,7 +444,9 @@ tests.seed_ask_tool`, then `app.main`: `e2e-db`'s restore deletes the last run's
   the WCAG A and AA tags (in dark this is the contrast measurement), no horizontal scroll, and exactly
   one `h1`. A failure names the route, theme and project and lists the rule ids and targets
   (`screenProblems` in `support.ts`).
-- The signed-in screens are `SIGNED_IN_ROUTES` in the same spec (`/profile`, `/forbidden`), captured and
+- The signed-in screens are `SIGNED_IN_ROUTES` in the same spec (`/profile`, `/forbidden`, `/conversation`, `/memory`, and
+  `/memory-list`, whose no-op `setup` gives it its own account and keeps it out of a Compose run, because it
+  states facts to the Anthropic fake), captured and
   checked the same way after signing up through the form; entries without a `setup` share one account
   per project. A role-gated route is an entry with a `setup(account)`, which the project writes in its own
   e2e support file (for example promoting `account.email` to the role) and the entry gets its own

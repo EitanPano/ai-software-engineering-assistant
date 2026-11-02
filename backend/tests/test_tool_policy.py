@@ -145,11 +145,14 @@ class TestRead(LabBacked):
         item = next(i for i in res.json()["items"] if i["toolName"] == "a_future_tool")
         assert item == {"toolName": "a_future_tool", "effect": None, "effects": ["ask", "deny"]}
 
-    async def test_knowledge_has_its_search_policy(self, client: httpx.AsyncClient) -> None:
+    async def test_knowledge_has_its_search_and_recall_policies(
+        self, client: httpx.AsyncClient
+    ) -> None:
         res = await client.get("/api/tool-policy/knowledge", headers=admin_bearer())
 
         assert res.json()["items"] == [
-            {"toolName": "search", "effect": "allow", "effects": ["allow", "ask", "deny"]}
+            {"toolName": "recall", "effect": "allow", "effects": ["allow", "ask", "deny"]},
+            {"toolName": "search", "effect": "allow", "effects": ["allow", "ask", "deny"]},
         ]
 
     async def test_an_unknown_server_is_a_404(self, client: httpx.AsyncClient) -> None:

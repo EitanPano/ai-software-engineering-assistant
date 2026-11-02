@@ -155,7 +155,10 @@ class TestDiscovery:
             }
         )
         offered = fake_model.requests[0]["tools"]
-        assert [d["name"] for d in offered] == ["knowledge__search"]  # type: ignore[attr-defined]
+        assert [d["name"] for d in offered] == [  # type: ignore[attr-defined]
+            "knowledge__recall",
+            "knowledge__search",
+        ]
 
     async def test_every_run_stores_the_last_good_listing_on_the_server_row(
         self, client: httpx.AsyncClient, fake_model: RecordingFake
@@ -167,7 +170,7 @@ class TestDiscovery:
         )
 
         assert fake_model.requests
-        assert [entry["name"] for entry in rows[0].tool_definition] == ["search"]
+        assert [entry["name"] for entry in rows[0].tool_definition] == ["search", "recall"]
 
     async def test_lists_each_enabled_server_and_skips_a_disabled_one(
         self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
@@ -178,7 +181,10 @@ class TestDiscovery:
 
         assert servers.reached(KNOWLEDGE_HOST) > 0
         assert servers.reached(LAB_HOST) == 0
-        assert [d["name"] for d in fake_model.requests[0]["tools"]] == ["knowledge__search"]  # type: ignore[attr-defined]
+        assert [d["name"] for d in fake_model.requests[0]["tools"]] == [  # type: ignore[attr-defined]
+            "knowledge__recall",
+            "knowledge__search",
+        ]
 
 
 @dataclass(frozen=True)
@@ -295,7 +301,10 @@ class TestStoredPrefix:
 
         request = fake_model.requests[0]
         assert request["system"] == AGENT_SYSTEM_PROMPT
-        assert [d["name"] for d in request["tools"]] == ["knowledge__search"]  # type: ignore[attr-defined]
+        assert [d["name"] for d in request["tools"]] == [  # type: ignore[attr-defined]
+            "knowledge__recall",
+            "knowledge__search",
+        ]
 
     async def test_every_request_across_runs_an_outage_and_a_changed_listing_is_byte_identical(
         self, client: httpx.AsyncClient, fake_model: RecordingFake, servers: Servers
@@ -321,8 +330,8 @@ class TestStoredPrefix:
         await Journey(client).run("hello")
 
         first, second = fake_model.requests
-        assert len(first["tools"]) == 1  # type: ignore[arg-type]
-        assert len(second["tools"]) == 1 + 6  # type: ignore[arg-type]
+        assert len(first["tools"]) == 2  # type: ignore[arg-type]
+        assert len(second["tools"]) == 2 + 6  # type: ignore[arg-type]
 
     async def test_a_conversation_with_stored_turns_keeps_its_old_prompt_and_no_tools(
         self, client: httpx.AsyncClient, fake_model: RecordingFake

@@ -10,6 +10,9 @@ import type {
 } from './client'
 import { client } from './client.gen'
 import type {
+  DeleteApiMemoryByIdData,
+  DeleteApiMemoryByIdErrors,
+  DeleteApiMemoryByIdResponses,
   GetApiConversationByIdData,
   GetApiConversationByIdErrors,
   GetApiConversationByIdMessageData,
@@ -40,6 +43,9 @@ import type {
   GetApiMcpServerData,
   GetApiMcpServerErrors,
   GetApiMcpServerResponses,
+  GetApiMemoryData,
+  GetApiMemoryErrors,
+  GetApiMemoryResponses,
   GetApiRunByIdEventData,
   GetApiRunByIdEventErrors,
   GetApiRunByIdEventResponse,
@@ -627,3 +633,26 @@ export const putApiToolPolicyByMcpServerIdByToolName = <ThrowOnError extends boo
       ...options.headers,
     },
   })
+
+/**
+ * List the caller's memories
+ */
+export const getApiMemory = <ThrowOnError extends boolean = false>(
+  options?: Options<GetApiMemoryData, ThrowOnError>,
+): RequestResult<GetApiMemoryResponses, GetApiMemoryErrors, ThrowOnError> =>
+  (options?.client ?? client).get<GetApiMemoryResponses, GetApiMemoryErrors, ThrowOnError>({
+    url: '/api/memory',
+    ...options,
+  })
+
+/**
+ * Delete one of the caller's memories
+ */
+export const deleteApiMemoryById = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteApiMemoryByIdData, ThrowOnError>,
+): RequestResult<DeleteApiMemoryByIdResponses, DeleteApiMemoryByIdErrors, ThrowOnError> =>
+  (options.client ?? client).delete<
+    DeleteApiMemoryByIdResponses,
+    DeleteApiMemoryByIdErrors,
+    ThrowOnError
+  >({ url: '/api/memory/{id}', ...options })

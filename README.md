@@ -25,11 +25,11 @@ good its answers are and cannot be trusted to act. This one is built to do all f
 
 ## Features
 
-- Multiple MCP servers: our own `knowledge` server gives the agent its search, and GitHub's official server, which you opt into, lets it read and act on GitHub; a third-party server's tools are pinned when an admin reads and accepts them on the MCP servers screen, a changed definition is denied until they accept it again, and an admin can turn a server off
+- Multiple MCP servers: our own `knowledge` server gives the agent its search and recall, and GitHub's official server, which you opt into, lets it read and act on GitHub; a third-party server's tools are pinned when an admin reads and accepts them on the MCP servers screen, a changed definition is denied until they accept it again, and an admin can turn a server off
 - Knowledge sources: an admin connects a public GitHub repository, indexed by symbol and embedded
 - Hybrid RAG: semantic and keyword search over connected GitHub repositories
 - Agentic RAG: the agent decides when to search, searches again when a result does not answer, and cites file and line
-- Persistent agent memory: conversation history distinct from long-term knowledge (planned)
+- Persistent agent memory: the agent keeps durable facts you state, recalls them in a new conversation when it decides to, for you alone, and you read and delete them on the Memory screen; conversation history stays apart from long-term knowledge
 - Tool execution permissions: an admin sets each tool to allow, ask or deny; a tool set to `ask` waits for a person to approve its exact arguments, across a restart, and writing an issue or a comment on GitHub can never be set to allow
 - Streaming responses: intermediate tool activity shown as it happens
 - Evaluation pipelines: an admin measures retrieval quality with an eval run; answer correctness (planned)
@@ -52,12 +52,12 @@ They stay in your environment.
 
 | Key | Needed for |
 | --- | --- |
-| `VOYAGE_API_KEY` | Connecting a repository and searching it |
+| `VOYAGE_API_KEY` | Connecting a repository, searching it and remembering facts |
 | `ANTHROPIC_API_KEY` | Chatting with the agent |
 
 Add a payment method to your Voyage account: its published rate limits start there, and its free
-tokens still apply. Connected code and search text go to Voyage to be embedded, so don't search for
-a secret. Connecting a repository needs no GitHub key, because public repositories are read
+tokens still apply. Connected code, search text and the facts the agent remembers go to Voyage to
+be embedded, so don't search for a secret or tell the agent one. Connecting a repository needs no GitHub key, because public repositories are read
 anonymously; only the optional [Acting on GitHub](#acting-on-github) takes a token. Without keys the
 app still starts in development, and the test suites run on scripted fakes.
 
@@ -96,7 +96,7 @@ cd ..
 cd backend
 uv run python -m app.main --reload
 cd ..
-# knowledge server: the agent's search tool
+# knowledge server: the agent's search and recall tools
 cd backend
 uv run poe knowledge
 cd ..
@@ -204,11 +204,12 @@ Three things to expect:
 | `RATE_LIMIT_SCALE` | backend: Multiplies every rate limit (1 to 1000). Production keeps 1; an e2e run raises it so a journey suite is not limited. There is no switch that turns limiting off. | `1` |
 | `ANTHROPIC_API_KEY` | backend: Anthropic API key for the agent. Required in production; a fake default applies elsewhere, and tests and e2e run on a scripted fake. | — |
 | `LLM_MODEL` | backend: The model the agent runs on, without a date suffix. | `claude-opus-5-5` |
+| `LLM_SIDE_MODEL` | backend: The model of the side call that extracts memories after a run, without a date suffix. | `claude-haiku-5-5` |
 | `ANTHROPIC_BASE_URL` | backend: Points the SDK at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
 | `VOYAGE_API_KEY` | backend: Voyage AI key for the code embeddings (voyage-code-4, paid per token). Required in production; a fake default applies elsewhere, and tests and e2e run on a scripted fake. | — |
 | `VOYAGE_BASE_URL` | backend: Points the Voyage client at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
 | `GITHUB_BASE_URL` | backend: Points the GitHub client at another server (the scripted fake in e2e). Leave unset; refused in production. | — |
-| `APP_PROCESS` | backend: Which process this is: backend (the API and its commands), knowledge (the MCP server that offers the agent its search tool; it needs only DATABASE_URL, VOYAGE_API_KEY and KNOWLEDGE_MCP_TOKEN) or github_gateway (holds GITHUB_MCP_PAT; it needs only that, GITHUB_MCP_TOKEN and GITHUB_MCP_UPSTREAM_URL). Required in production; elsewhere it defaults to backend. | `backend` |
+| `APP_PROCESS` | backend: Which process this is: backend (the API and its commands), knowledge (the MCP server that offers the agent its search and recall tools; it needs only DATABASE_URL, VOYAGE_API_KEY and KNOWLEDGE_MCP_TOKEN) or github_gateway (holds GITHUB_MCP_PAT; it needs only that, GITHUB_MCP_TOKEN and GITHUB_MCP_UPSTREAM_URL). Required in production; elsewhere it defaults to backend. | `backend` |
 | `KNOWLEDGE_MCP_URL` | backend: Where the agent reaches the knowledge MCP server (`uv run poe knowledge`, port 8001). | `http://127.0.0.1:8001/mcp` |
 | `KNOWLEDGE_MCP_TOKEN` | backend: Bearer token both sides share; the knowledge server refuses a call without it. Required in production, at least 32 characters; a fake default applies elsewhere. | — |
 | `GITHUB_MCP_URL` | backend: Where the agent reaches the GitHub gateway (`uv run poe github-gateway`, port 8002). | `http://127.0.0.1:8002/mcp` |

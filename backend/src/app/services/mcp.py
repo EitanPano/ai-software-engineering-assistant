@@ -32,10 +32,10 @@ reaches a server with no socket.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 import httpx2
 import mcp_types as types
@@ -44,12 +44,13 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.server import Server
 from mcp.server.context import ServerRequestContext
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp_types import RequestParamsMeta
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config.constants import MAX_BODY_BYTES, MCP
-from app.models.mcp_server.constants import SEARCH_TOOL
+from app.models.mcp_server.constants import CALLER_META_KEY
 from app.models.mcp_server.type import ListedTool, same_definition
-from app.models.search.enums import ToolSearchCode
+from app.models.memory.type import ToolRecallFailed
 from app.models.search.type import ToolSearchFailed
 from app.services.logger import log
 from app.services.security.crypto import constant_time_equals
@@ -77,7 +78,9 @@ class ToolReply:
     files: tuple[EmbeddedFile, ...] = ()
 
 
-type ToolCaller = Callable[[str, dict[str, object]], Awaitable[str | ToolReply]]
+# (name, arguments, caller): the caller is the person a request's `_meta` names, `None` when it
+# names none.
+type ToolCaller = Callable[[str, dict[str, object], str | None], Awaitable[str | ToolReply]]
 
 _state: dict[str, httpx2.AsyncBaseTransport] = {}
 
@@ -120,6 +123,18 @@ class ToolResult:
 
     text: str
     is_error: bool
+
+
+_CALLER_MAX_CHARS: Final = 128
+
+
+def caller_of(meta: Mapping[str, object] | None) -> str | None:
+    """The caller a request's `_meta` names, or `None`: absent, not a string, empty or over-long
+    all fail closed, and a tool that needs a caller then refuses."""
+    value = None if meta is None else meta.get(CALLER_META_KEY)
+    if isinstance(value, str) and 0 < len(value) <= _CALLER_MAX_CHARS:
+        return value
+    return None
 
 
 def use_transport(transport: httpx2.AsyncBaseTransport | None) -> None:
@@ -233,6 +248,7 @@ async def call_tool(
     *,
     token: str | None,
     pinned: ListedTool | None = None,
+    user_id: str | None = None,
 ) -> ToolResult:
     """One call of `name`, or `McpUnavailable`. A tool that fails is an `is_error` result, not an
     exception: the model gets to see it.
@@ -248,7 +264,11 @@ async def call_tool(
             live = next((_listed(t) for t in listing.tools if t.name == name), None)
             if live is None or not same_definition(live, pinned):
                 return None
-        result = await client.call_tool(name, arguments)
+        # The caller rides in `_meta`, beside the arguments: the model never writes it.
+        meta: RequestParamsMeta | None = None
+        if user_id is not None:
+            meta = cast("RequestParamsMeta", {CALLER_META_KEY: user_id})
+        result = await client.call_tool(name, arguments, meta=meta)
         return ToolResult(text=_result_text(result.content), is_error=result.is_error)
 
     outcome = await _in_own_task(url, token, MCP.call_seconds, work)
@@ -388,11 +408,10 @@ def build_app(
     async def on_call_tool(
         ctx: ServerRequestContext[None, object], params: types.CallToolRequestParams
     ) -> types.CallToolResult:
-        del ctx
         try:
             if params.name not in by_name:
                 raise ToolFailure("unknown_tool")
-            reply = await call(params.name, dict(params.arguments or {}))
+            reply = await call(params.name, dict(params.arguments or {}), caller_of(ctx.meta))
         except ToolFailure as failure:
             return types.CallToolResult(
                 content=[types.TextContent(text=failure.code)], is_error=True
@@ -421,34 +440,56 @@ def build_app(
     return McpApp(starlette, lifespan, token, around)
 
 
-type Search = Callable[[str], Awaitable[str]]
+type ServedCall = Callable[[dict[str, object], str | None], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class ServedTool:
+    """A tool the `knowledge` server serves: its definition, its call, and the one code a failure
+    nobody expected becomes. `call(arguments, caller)` checks its own arguments (the server cannot
+    know their shape) and raises `ToolFailure`, `ToolSearchFailed` or `ToolRecallFailed` with a
+    fixed code."""
+
+    definition: ListedTool
+    call: ServedCall
+    unavailable: str
 
 
 def serve(
-    search: Search,
+    tools: Sequence[ServedTool],
     *,
     token: str,
     allowed_hosts: Sequence[str],
     around: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> McpApp:
-    """The `knowledge` server: one tool, `search`, over `search`. A call whose arguments are not
-    exactly `{ query: string }` is `invalid_query`; any failure of the search is its fixed code, and
-    anything unexpected is `search_unavailable`: exception text never leaves the process."""
+    """The `knowledge` server over `tools`. A tool's own failure is its fixed code, and anything
+    else is logged by its class and answered with the tool's `unavailable` code: exception text
+    never leaves the process."""
+    by_name = {tool.definition.name: tool for tool in tools}
 
-    async def call(name: str, arguments: dict[str, object]) -> str:
-        del name
-        query = arguments.get("query")
-        if set(arguments) != {"query"} or not isinstance(query, str):
-            raise ToolFailure(ToolSearchCode.invalid_query.value)
+    async def call(name: str, arguments: dict[str, object], caller: str | None) -> str:
+        tool = by_name[name]
         try:
-            return await search(query)
+            return await tool.call(arguments, caller)
+        except ToolFailure:
+            raise
         except ToolSearchFailed as failure:
             raise ToolFailure(failure.code.value) from None
+        except ToolRecallFailed as failure:
+            raise ToolFailure(failure.code.value) from None
         except Exception as error:
-            log.error("knowledge search failed", {"reason": type(error).__name__}, error)
-            raise ToolFailure(ToolSearchCode.search_unavailable.value) from None
+            log.error(
+                "knowledge tool failed", {"tool": name, "reason": type(error).__name__}, error
+            )
+            raise ToolFailure(tool.unavailable) from None
 
-    return build_app([SEARCH_TOOL], call, token=token, allowed_hosts=allowed_hosts, around=around)
+    return build_app(
+        [tool.definition for tool in tools],
+        call,
+        token=token,
+        allowed_hosts=allowed_hosts,
+        around=around,
+    )
 
 
 _FORWARD_EXACT: Final = frozenset({b"accept", b"content-type"})

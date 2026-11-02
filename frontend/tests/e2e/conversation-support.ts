@@ -18,6 +18,11 @@ export const MARKER = {
   // A `github__add_issue_comment` call at `ask` whose body runs past a screen, then "Tool done."
   // (backend/tests/fake_anthropic.py, served by the fake GitHub MCP server).
   githubComment: '[[github_comment]]',
+  // The run calls `knowledge__recall` and answers from its result (backend/tests/fake_anthropic.py).
+  recall: '[[recall]]',
+  // Makes the fake's extraction side call return this one fact for the run's `user` message
+  // (backend/tests/fake_anthropic.py). The text has no `]`.
+  fact: (text: string) => `[[fact:${text}]]`,
 }
 export const TEXT = {
   first: 'The first part.',

@@ -191,6 +191,13 @@ async def read_history(conversation_id: str) -> list[HistoryTurn]:
     ]
 
 
+async def read_user_text(*, conversation_id: str, run_id: str) -> str | None:
+    """System operation: the text of the `user` message a run answers, or `None`. Role `user`
+    alone: no assistant text, tool output or earlier turn, so memory extraction reads only what the
+    person wrote in this message."""
+    return await service.find_user_text(conversation_id, run_id)
+
+
 async def freeze_prefix(
     conversation_id: str, *, system_prompt: str, tools: list[dict[str, object]]
 ) -> ConversationPrefix:

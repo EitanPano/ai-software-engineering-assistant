@@ -277,7 +277,7 @@ class TestOddNames:
             "name": name,
             "input": {"query": "q"},
         }
-        answer = await agent._call_tool(run_id, block, self.PREFIX, allowed=True)
+        answer = await agent._call_tool(run_id, "user", block, self.PREFIX, allowed=True)
         assert isinstance(answer, dict)
         assert answer["is_error"] is True
 
@@ -350,8 +350,9 @@ class TestSeededRows:
             "select p.tool_name, p.effect as status, s.name as result from tool_policy p "
             "join mcp_server s on s.id = p.mcp_server_id",
         )
-        assert [(r.tool_name, r.status) for r in rows if r.result == "knowledge"] == [
-            ("search", "allow")
+        assert sorted((r.tool_name, r.status) for r in rows if r.result == "knowledge") == [
+            ("recall", "allow"),
+            ("search", "allow"),
         ]
         # 0011 seeds the seven GitHub tools beside it: reads allow, the two writes ask.
         github = {r.tool_name: r.status for r in rows if r.result == "github"}

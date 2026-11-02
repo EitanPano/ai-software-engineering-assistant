@@ -131,9 +131,15 @@ async def find_server(name: str) -> McpServerRecord | None:
 
 
 async def call_server_tool(
-    *, server: McpServerRecord, tool_name: str, arguments: dict[str, object]
+    *,
+    server: McpServerRecord,
+    tool_name: str,
+    arguments: dict[str, object],
+    user_id: str | None = None,
 ) -> ToolOutcome:
-    """System operation: one call of a tool. A server that cannot be reached, or that flags the
+    """System operation: one call of a tool. `user_id`, the person the run belongs to, is sent to
+    `knowledge` alone, in the request's `_meta` (never in the arguments), so no third party learns
+    who asked. A server that cannot be reached, or that flags the
     result as an error, is a `failed` outcome, never an exception: the model gets to see it. A
     third party's tool that is not pinned, or whose live definition differs from its pin (checked
     in the call's own session), is `denied` and nothing is called."""
@@ -150,7 +156,14 @@ async def call_server_tool(
             log.warning("tool is not pinned", {"server": server.name, "tool": tool_name})
             return ToolOutcome(ToolCallStatus.denied, _DENIED_OUTPUT)
     try:
-        result = await mcp.call_tool(url, tool_name, arguments, token=token, pinned=pinned)
+        result = await mcp.call_tool(
+            url,
+            tool_name,
+            arguments,
+            token=token,
+            pinned=pinned,
+            user_id=user_id if server.name == KNOWLEDGE_SERVER else None,
+        )
     except ToolDefinitionChanged:
         _log_changed(server, tool_name)
         return ToolOutcome(ToolCallStatus.denied, _DENIED_OUTPUT)

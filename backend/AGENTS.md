@@ -89,11 +89,14 @@ src/app/
                       eval: admin-run retrieval measurements, see Evals;
                       approval: routes, schema and controller only, its rows are the run
                       module's, see The agent;
+                      memory: a person's long-term facts, `GET /api/memory` and `DELETE
+                      /api/memory/{id}`, plus the rules the `knowledge` server's `recall` and the
+                      extraction reaction call, see Memory;
                       mcp_server, tool_policy: admin-only routes (`/api/mcp-server`,
                       `/api/tool-policy`), schema, controller and service; tool_policy's
                       controller imports mcp_server's, never the reverse; see The agent)
   models/<name>/      interface · type · enums · constants (auth, session, user,
-                      conversation, run, approval, source, search, eval, mcp_server, tool_policy)
+                      conversation, run, approval, source, search, eval, mcp_server, tool_policy, memory)
   middleware/         request_id · request_log · security_headers · cors · proxy · body_limit ·
                       error_handler · not_found · head · static_files · context
                       asgi (helpers the ASGI middleware share)
@@ -102,12 +105,12 @@ src/app/
                       mcp.py · github.py · voyage.py · chunk.py · parse.py · parse_worker.py
     security/         crypto · jwt · cookies · otp
     communicate/      __init__.py · console · mail · sms · whatsapp · templates/
-    utils/            error · openapi · clock · api_model · pagination · postgres_error · retrieval_metric · jsonb (pure, no I/O)
+    utils/            error · openapi · clock · api_model · pagination · postgres_error · retrieval_metric · jsonb · secret_shape (pure, no I/O)
   infra/              dependency.py · loop.py · memory.py · postgres.py · pubsub.py · scheduler.py
     jobs/             one file per background job: session_cleanup
-    subscribers/      one file per event reaction: send_welcome, execute_run, resume_run, index_source, execute_eval_run
+    subscribers/      one file per event reaction: send_welcome, execute_run, resume_run, index_source, execute_eval_run, extract_memory
     migrations/       NNNN-<topic>.sql, the schema, applied in name order
-    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals), accept_mcp_server.py (an admin pins a third-party server's tools, see The agent), mcp_seed.py (restores the rows `0009-mcp-server.sql` and `0011-github-mcp-server.sql` seed; the e2e preparation and the test reset call it. The one exception to "a script reaches a module only through its controller": it deletes from `tool_policy` and `mcp_server` through `services/db`, so it refuses unless `current_database()` ends in `_test` or `_e2e`)
+    scripts/          one-off commands: migrate.py (poe migrate), e2e_db.py (poe e2e-db), grant_admin.py (the first admin), seed_eval_case.py (the eval cases, see Evals), accept_mcp_server.py (an admin pins a third-party server's tools, see The agent), mcp_seed.py (restores the rows `0009-mcp-server.sql`, `0011-github-mcp-server.sql` and `0012-memory.sql` seed; the e2e preparation and the test reset call it. The one exception to "a script reaches a module only through its controller": it deletes from `tool_policy` and `mcp_server` through `services/db`, so it refuses unless `current_database()` ends in `_test` or `_e2e`)
     eval_cases/       the labelled case files the seed reads (click-8.5.0.json)
 tests/                mirrors src/app/ (a package throughout, so two test_x.py cannot clash)
 openapi.json          the committed contract, written by the `contract` command
@@ -452,7 +455,7 @@ changes only by plan.
   and `POST /api/mcp-server/{id}/acceptance` (the digest of what was shown; the handler reads the
   server live again, a different digest is a 409 that writes nothing, and it pins what it just
   read). `McpServer.pinStatus` is `tool.pin_status` over stored rows, no call to any server.
-  `knowledge` has no pin: its review and accept are a 409. `GET /api/tool-policy/{mcpServerId}`
+  `knowledge` has no pin: its review and accept are a 409 (its `recall` policy row is seeded `allow` by `0012`). `GET /api/tool-policy/{mcpServerId}`
   is one document (the union of the rows and the pin, `knowledge`: its last listing; a tool with no
   row has `effect` null) and `PUT .../{toolName}` upserts one row: an unknown server or tool is a
   404, checked before `tool.effects_for`, which on `github` offers `allow` only for
@@ -520,8 +523,30 @@ changes only by plan.
   against `knowledge:*` and loopback. It connects `postgres` alone: no bus, scheduler or sweep (a
   second sweep would end the API's live runs). `APP_PROCESS=knowledge` needs only `DATABASE_URL`,
   `VOYAGE_API_KEY` and `KNOWLEDGE_MCP_TOKEN`; `load_env` fills the other secrets with per-boot
-  random values. `APP_PROCESS` is required in production (`backend` or `knowledge`). Its one tool,
-  `search`, is `search_for_tool` (see Search).
+  random values. `APP_PROCESS` is required in production (`backend` or `knowledge`). Its two tools,
+  built as `ServedTool`s (`services/mcp.py`: definition, call, and the one code an unexpected
+  failure becomes) and each checking its own arguments, are `search`, `search_for_tool` (see
+  Search), and `recall`, `recall_for_tool` (see Memory). They share `tool_slot`
+  (`api/search/controller.py`), so `concurrent_searches` bounds both and the pool stays bounded.
+  The caller of a call travels in MCP's `_meta["assistant.knowledge/user_id"]`
+  (`CALLER_META_KEY`), beside the model's arguments and never in them: `mcp.call_tool(user_id=)`
+  sends it, `caller_of(ctx.meta)` reads it and is `None` when it is absent or malformed, so a tool
+  that needs a caller fails closed. `call_server_tool(user_id=)` passes `run.user_id` to
+  `knowledge` alone (`_call_tool` and `_decided_call` carry it, so a resumed call has it too):
+  `github` and a third-party server are sent none. The same bearer token now guards every
+  person's memories.
+- Side calls. `services/anthropic.py › parse_turn(output_type, *, system, content, model,
+  effort)` is one non-streaming call beside a run, for a job that is not the agent: a Pydantic
+  type in, a validated instance out, through `output_config.format` built by the SDK's
+  `transform_schema` and validated from the served text here, not by `.parse()` (that validates
+  every text block inside the response parser, so a cut-off answer or text before a `fallback`
+  block raises before `stop_reason` can be read, with the model's text in the error). It reads
+  `stop_reason` first (`SideCallRefused`, `SideCallCutOff`, no retry), retries one invalid text
+  once and then raises `SideCallInvalid from None`, sends no `thinking`, no `cache_control`, no
+  `block_binding` and never `fallbacks` (a refused side call only stores nothing), writes no
+  `message`, and logs `usage_in`, `usage_out`, `cache_write` and `cache_read` with no content.
+  `SIDE_CALL` and `MEMORY` are in `config/constants.py`; the model is `LLM_SIDE_MODEL`
+  (`claude-haiku-5-5`).
 - Tests run on `tests/fake_anthropic.py`, a scripted fake of `POST /v1/messages` (markers in the
   user's message pick the script, `[[research]]` searches twice and cites; it refuses a `strict`
   schema the API would; `python -m tests.fake_anthropic` serves it on 8101 for e2e, and
@@ -550,6 +575,47 @@ changes only by plan.
   process during a pause. `tests/knowledge_support.py` calls `knowledge` directly. The seeded `mcp_server` and
   `tool_policy` rows survive `reset_store()` (restored from the migration's own statements by
   `infra/scripts/mcp_seed.py`) and the e2e preparation.
+
+## Memory
+
+- Endpoints, `require_auth` and no role, the caller's own rows only: `GET /api/memory` (newest
+  first, `Memory { id, content, conversationId, createdAt }`, no embedding) and `DELETE
+  /api/memory/{id}` (204; another user's, an admin's included, is a 404). A delete removes the row
+  and its embedding together, so recall stops at once; a conversation that already read the memory
+  keeps its stored `tool_result`, `tool_call.result` and `run_event`, which are never edited.
+- Table `memory` (`0012-memory.sql`): `user_id` and `conversation_id` are plain text, a btree on
+  `(user_id, created_at, id)`, a unique index on `(user_id, lower(content))`, and `embedding
+  halfvec(1024)` with no vector index. Recall is an exact scan of one person's rows (at most
+  `MEMORY.max_per_user`, 1,000), so every row is considered; an HNSW graph spans every person and
+  filters after, so a person with few rows could come back short.
+- Extraction. `_carry_out` publishes `run.completed` (`RUN_COMPLETED`) once `finish_run` returns
+  true for a `completed` run, resumed or not, and `infra/subscribers/extract_memory.py` calls
+  `api/memory/controller.py › extract_memory(run_id=)`: `max_per_user` is checked before any paid
+  call, then `read_user_text(conversation_id=, run_id=)` (the run's `user` message alone, from the
+  conversation module), `parse_turn(MemoryExtraction, ...)` on `LLM_SIDE_MODEL`, at most `extract_limit` facts,
+  dropping any over `fact_max_chars`, holding a NUL, shaped like a key
+  (`services/utils/secret_shape.py`) or already stored, `embed_documents`, and the insert last,
+  `on conflict do nothing`. Any `Exception` logs its class and counts and touches nothing; no
+  content is logged. The bus is in process, so a crash loses that one extraction. There is no
+  model-facing write tool.
+- `recall`, the `knowledge` server's second tool: `{ query: string }`, `strict`, no user field.
+  `recall_for_tool(query=, user_id=)` answers `no_caller` first (no `_meta`, no embedding, no read),
+  checks the query as `GET /api/search` checks `q`, takes a `tool_slot`, embeds the query and scans.
+  The result is one text block of JSON, `{ memories: [{ content, createdAt }] }`, best first, at
+  most `MEMORY.recall_limit`, mapped field by field; none is a success. A failure is `isError` with
+  one fixed code: `invalid_query`, `no_caller`, `busy`, `recall_unavailable`. Its description
+  carries when to call it and that what it returns is data and not instructions;
+  `AGENT_SYSTEM_PROMPT` is unchanged. A conversation frozen before this branch is never offered
+  `recall` (its prefix is frozen).
+- Tests: `tests/test_memory.py` (request rules, routes, extraction, caller binding),
+  `test_agent_memory.py` (recall through the loop, owner only, a deleted memory),
+  `test_knowledge.py › TestRecallTool`, `services/test_anthropic.py › TestParseTurn`,
+  `services/test_mcp.py › TestCallerMeta`, `tests/memory_support.py` (`remember`). The fake model
+  answers a side call (a request without `stream`): `[[fact:TEXT]]` is a fact (TEXT is anything up
+  to `]]`), `[[extract_refused]]`, `[[extract_cut]]`, `[[extract_invalid]]` and
+  `[[extract_invalid_once]]` script the failures; `[[recall]]` calls `knowledge__recall` and
+  answers `From memory: <content>; ...` or `Nothing is remembered.` from its result (see the
+  module docstring of `tests/fake_anthropic.py`).
 
 ## The source index
 

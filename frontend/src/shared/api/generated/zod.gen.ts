@@ -271,6 +271,24 @@ export const zMcpServerPage = z.object({
 })
 
 /**
+ * Memory
+ */
+export const zMemory = z.object({
+  id: z.string(),
+  content: z.string(),
+  conversationId: z.string(),
+  createdAt: z.iso.datetime(),
+})
+
+/**
+ * MemoryPage
+ */
+export const zMemoryPage = z.object({
+  items: z.array(zMemory),
+  nextCursor: z.string().nullable(),
+})
+
+/**
  * Message
  */
 export const zMessage = z.object({
@@ -883,3 +901,22 @@ export const zPutApiToolPolicyByMcpServerIdByToolNamePath = z.object({
  * The tool's policy, created or changed
  */
 export const zPutApiToolPolicyByMcpServerIdByToolNameResponse = zToolPolicy
+
+export const zGetApiMemoryQuery = z.object({
+  cursor: z.string().optional(),
+  limit: z.int().gte(1).lte(100).optional().default(20),
+})
+
+/**
+ * A page of the caller's memories, newest first
+ */
+export const zGetApiMemoryResponse = zMemoryPage
+
+export const zDeleteApiMemoryByIdPath = z.object({
+  id: z.string().min(1),
+})
+
+/**
+ * The memory is deleted
+ */
+export const zDeleteApiMemoryByIdResponse = z.void()

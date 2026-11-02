@@ -7,6 +7,7 @@ export const NAV: NavEntry[] = [
   { to: '/', label: 'Home' },
   { to: '/conversation', label: 'Conversations' },
   { to: '/search', label: 'Search' },
+  { to: '/memory', label: 'Memory' },
   { to: '/source', label: 'Sources', role: 'admin' },
   { to: '/eval-run', label: 'Eval runs', role: 'admin' },
   { to: '/mcp-server', label: 'MCP servers', role: 'admin' },

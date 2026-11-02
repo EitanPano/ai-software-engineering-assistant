@@ -53,7 +53,11 @@ class TestDiscovery(LabBacked):
         offered = fake_model.requests[0]["tools"]
         assert isinstance(offered, list)
         assert offered_names(fake_model.requests[0]) == sorted(
-            ["knowledge__search", *(f"github__{t.name}" for t in recorded_tools())]
+            [
+                "knowledge__recall",
+                "knowledge__search",
+                *(f"github__{t.name}" for t in recorded_tools()),
+            ]
         )
         github = [d for d in offered if str(d["name"]).startswith("github__")]
         assert len(github) == 7
@@ -104,7 +108,7 @@ class TestDiscovery(LabBacked):
 
         _, frames = await Journey(client).run("hello")
 
-        assert offered_names(fake_model.requests[0]) == ["knowledge__search"]
+        assert offered_names(fake_model.requests[0]) == ["knowledge__recall", "knowledge__search"]
         assert "mcp_server_unavailable" not in types_of(frames)
         assert servers.reached(GITHUB_HOST) == 0
 
@@ -118,7 +122,7 @@ class TestDiscovery(LabBacked):
 
         _, frames = await Journey(client).run("hello")
 
-        assert offered_names(fake_model.requests[0]) == ["knowledge__search"]
+        assert offered_names(fake_model.requests[0]) == ["knowledge__recall", "knowledge__search"]
         assert "mcp_server_unavailable" not in types_of(frames)
 
     async def test_a_file_reaches_the_model_whole_in_the_tool_result(

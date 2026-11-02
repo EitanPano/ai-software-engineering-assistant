@@ -235,6 +235,26 @@ async def insert_message(record: MessageRecord, *, db: Executor | None = None) -
     return _to_message(row)
 
 
+@dataclass(frozen=True)
+class _TextRow:
+    text: str
+
+
+async def find_user_text(
+    conversation_id: str, run_id: str, *, db: Executor | None = None
+) -> str | None:
+    """The text of the `user` message the run answers, and nothing else of the conversation. It
+    leads with `conversation_id`, so the `(conversation_id, position)` index bounds the scan."""
+    row = await fetch_one(
+        _TextRow,
+        "select text from message where conversation_id = %s and run_id = %s and role = 'user' "
+        "order by position limit 1",
+        (conversation_id, run_id),
+        db=db,
+    )
+    return None if row is None else row.text
+
+
 async def list_messages(
     conversation_id: str, *, cursor: str | None, limit: int, db: Executor | None = None
 ) -> Slice[MessageRecord]:

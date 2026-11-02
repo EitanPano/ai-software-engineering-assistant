@@ -82,6 +82,8 @@ COMPONENTS: Final = frozenset(
         "ToolPolicy",
         "ToolPolicySet",
         "SetToolPolicyBody",
+        "Memory",
+        "MemoryPage",
     }
 )
 

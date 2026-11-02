@@ -223,6 +223,9 @@ class Env(BaseModel):
     anthropic_api_key: Annotated[str, Field(min_length=1)]
     # No date suffix (`.doc/conventions.md`, Claude API).
     llm_model: Annotated[str, Field(min_length=1)] = "claude-opus-5-5"
+    # The model of a side call (memory extraction): a job beside the agent, on the person's own key.
+    # A side call never sends `fallbacks`, so a model without them is fine.
+    llm_side_model: Annotated[str, Field(min_length=1)] = "claude-haiku-5-5"
     # Points the SDK at another server: the scripted fake in tests and e2e. Refused in production.
     anthropic_base_url: Annotated[str, Field(min_length=1)] | None = None
     # Embeds the code chunks (`services/voyage.py`); paid per token.

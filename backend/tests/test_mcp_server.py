@@ -547,7 +547,7 @@ class TestEnabled(LabBacked):
         assert res.json()["enabled"] is False
         assert (await stored()).enabled is False
         names = [d["name"] for d in fake_model.requests[0]["tools"]]  # type: ignore[attr-defined]
-        assert names == ["knowledge__search"]
+        assert names == ["knowledge__recall", "knowledge__search"]
 
     async def test_a_frozen_conversations_call_is_denied_with_no_server_call(
         self, client: httpx.AsyncClient, servers: Servers

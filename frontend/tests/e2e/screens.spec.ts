@@ -36,6 +36,35 @@ const SIGNED_IN_ROUTES: {
   { route: '/profile' },
   { route: '/forbidden' },
   { route: '/conversation' },
+  // The memory list, empty: a memory exists only after a run and its extraction, which need the
+  // Anthropic fake, and this group also runs against a Compose stack that has none.
+  { route: '/memory' },
+  {
+    // A populated list: two facts stated in one message, a long one that wraps. The Anthropic fake
+    // is needed, so the entry carries a no-op `setup`, which leaves it out of a Compose run (there
+    // is no fake there) and gives it its own account. `/memory-list` only names the file.
+    route: '/memory-list',
+    setup: async () => {},
+    prepare: async (page) => {
+      const first = `My deploy notes live in ops-${uniqueToken()}.md`
+      const second =
+        'I work on a service that ingests repositories, chunks them by symbol and embeds the chunks with a code model, and I prefer short answers that name the file and the lines'
+      await page.goto('/conversation')
+      await page.getByRole('button', { name: 'Start conversation' }).click()
+      await expect(page).toHaveURL(/\/conversation\/[^/]+$/)
+      await page.getByLabel('Message').fill(`Remember [[fact:${first}]] [[fact:${second}]]`)
+      await page.getByRole('button', { name: 'Send message' }).click()
+      await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled({
+        timeout: 30_000,
+      })
+      await expect(async () => {
+        await page.goto('/memory')
+        await expect(page.getByText(first)).toBeVisible({ timeout: 2_000 })
+        await expect(page.getByText(second)).toBeVisible({ timeout: 2_000 })
+      }).toPass({ timeout: 30_000 })
+      return '/memory'
+    },
+  },
   // The admin screens: each has its own account, promoted on the e2e database.
   {
     route: '/source',

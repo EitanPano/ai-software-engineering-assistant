@@ -63,7 +63,9 @@ human.
   engines or a share preview.
 - Data retention and privacy: conversations and memories are kept until the user deletes them.
   API keys are never stored in messages, memories or run events. Prompts and retrieved code are
-  sent to Anthropic, and connected code and search text to Voyage AI for embedding.
+  sent to Anthropic, and connected code, search text and memory text to Voyage AI for embedding. A
+  deleted memory leaves recall at once and stays in a conversation that already read it, whose
+  history is never edited.
 
 ## Design
 

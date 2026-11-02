@@ -119,7 +119,7 @@ export default defineConfig({
           },
         },
         {
-          // Our `knowledge` MCP server, the process the agent's search tool calls. It starts after
+          // Our `knowledge` MCP server, the process the agent's tools call. It starts after
           // the API because the API's command prepares the database (a second `e2e-db` would
           // empty its tables) and it connects postgres alone. Voyage is the fake. `stdout` stays
           // at Playwright's default (ignored), as on the API but for another reason: it sends no

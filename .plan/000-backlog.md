@@ -18,11 +18,11 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-- [ ] a tool accepted later reaches existing conversations
 - [ ] agent remembers long-term knowledge across conversations
 - [ ] agent returns schema-validated structured results
 - [ ] agent reads a file from the knowledge base
 - [ ] admin can measure answer correctness with an eval run
+- [ ] a tool accepted later reaches existing conversations
 - [ ] admin can manage eval cases
 - [ ] agent runs have a spend cap
 - [ ] search has a global spend cap

@@ -78,10 +78,13 @@ class Lab:
     """What `lab`'s tools were asked to do, and the parallel calls' meeting."""
 
     calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    # The caller each call's `_meta` named; a third party is sent none, so each is `None`.
+    callers: list[str | None] = field(default_factory=list)
     started: dict[str, asyncio.Event] = field(default_factory=dict)
 
-    async def call(self, name: str, arguments: dict[str, object]) -> str:
+    async def call(self, name: str, arguments: dict[str, object], user_id: str | None) -> str:
         self.calls.append((name, arguments))
+        self.callers.append(user_id)
         if name == "boom":
             raise RuntimeError("secret internal detail")
         if name in {"first", "second"}:

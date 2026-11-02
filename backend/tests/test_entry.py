@@ -523,6 +523,7 @@ class TestLoadEnv:
 
         assert "ANTHROPIC_API_KEY" in loaded.defaulted_secrets
         assert loaded.env.llm_model == "claude-opus-5-5"
+        assert loaded.env.llm_side_model == "claude-haiku-5-5"
         assert loaded.env.anthropic_base_url is None
 
     def test_refuses_a_base_url_for_the_model_api_in_production_only(self) -> None:

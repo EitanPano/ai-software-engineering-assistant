@@ -155,6 +155,7 @@ ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.resume_run",
   "app.infra.pubsub -> app.infra.subscribers.index_source",
   "app.infra.pubsub -> app.infra.subscribers.execute_eval_run",
+  "app.infra.pubsub -> app.infra.subscribers.extract_memory",
   # The boot sweeps import the run, source and eval rules inside their functions, after every
   # resource is connected.
   "app.infra.dependency -> app.api.run.controller",
@@ -725,6 +726,7 @@ ignore_imports = [
   "app.infra.pubsub -> app.infra.subscribers.resume_run",
   "app.infra.pubsub -> app.infra.subscribers.index_source",
   "app.infra.pubsub -> app.infra.subscribers.execute_eval_run",
+  "app.infra.pubsub -> app.infra.subscribers.extract_memory",
   "app.infra.dependency -> app.api.run.controller",
   "app.infra.dependency -> app.api.source.controller",
   "app.infra.dependency -> app.api.eval.controller",
@@ -803,7 +805,7 @@ source_modules = ["app.api", "app.middleware", "app.infra", "app.services", "app
 forbidden_modules = ["app.server"]
 allow_indirect_imports = true
 
-# The `knowledge` entry connects `postgres` alone and serves one tool. It imports no HTTP layer, no
+# The `knowledge` entry connects `postgres` alone and serves two tools. It imports no HTTP layer, no
 # other entry, no module's routes or data layer, and none of `infra/` but the dependency list and
 # the store: a bus, a scheduler or a sweep here would end the API's live runs or run its jobs twice.
 [[tool.importlinter.contracts]]

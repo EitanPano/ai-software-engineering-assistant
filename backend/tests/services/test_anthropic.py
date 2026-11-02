@@ -1,19 +1,25 @@
+import contextlib
 import json
 import traceback
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import httpx2
 import pytest
 from anthropic import AsyncAnthropic, BadRequestError
+from pydantic import BaseModel
 
 from app.models.conversation.type import HistoryTurn
 from app.services.anthropic import (
     Block,
     InvalidModelOutput,
     ModelUnavailable,
+    SideCallCutOff,
+    SideCallInvalid,
+    SideCallRefused,
     TurnResult,
     count_tokens,
     echo_blocks,
+    parse_turn,
     served_blocks,
     stream_turn,
     use_client,
@@ -403,3 +409,181 @@ class TestBlocks:
 
         assert served_blocks(blocks) == [{"type": "text"}]
         assert served_blocks([{"type": "text"}]) == [{"type": "text"}]
+
+
+class Facts(BaseModel):
+    facts: list[str]
+
+
+def side_requests(fake: RecordingFake) -> list[dict[str, object]]:
+    """The requests that were not streamed: the side calls."""
+    return [request for request in fake.requests if not request.get("stream")]
+
+
+async def extract(text: str) -> Facts:
+    return await parse_turn(
+        Facts, system="Extract.", content=text, model="claude-haiku-5-5", effort="low"
+    )
+
+
+def message_json(
+    content: list[dict[str, object]], stop_reason: str = "end_turn"
+) -> httpx2.Response:
+    return httpx2.Response(
+        200,
+        json={
+            "id": "msg_x",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-haiku-5-5",
+            "content": content,
+            "stop_reason": stop_reason,
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "cache_creation_input_tokens": 2,
+                "cache_read_input_tokens": 3,
+            },
+        },
+    )
+
+
+@contextlib.asynccontextmanager
+async def stub_model(
+    handler: Callable[[httpx2.Request], httpx2.Response],
+) -> AsyncIterator[None]:
+    http = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    use_client(
+        AsyncAnthropic(api_key="test", base_url="http://fake", http_client=http, max_retries=0)
+    )
+    try:
+        yield
+    finally:
+        use_client(None)
+        await http.aclose()
+
+
+class TestParseTurn:
+    async def test_returns_a_validated_instance(self, fake_model: RecordingFake) -> None:
+        result = await extract("I use uv. [[fact:The person uses uv.]]")
+
+        assert result == Facts(facts=["The person uses uv."])
+
+    async def test_sends_the_side_call_request(self, fake_model: RecordingFake) -> None:
+        await extract("I use uv. [[fact:The person uses uv.]]")
+
+        (request,) = side_requests(fake_model)
+        assert request["model"] == "claude-haiku-5-5"
+        assert request["system"] == "Extract."
+        assert request["max_tokens"] == 16000
+        assert request["messages"] == [
+            {"role": "user", "content": "I use uv. [[fact:The person uses uv.]]"}
+        ]
+        output = request["output_config"]
+        assert isinstance(output, dict)
+        assert output["effort"] == "low"
+        assert output["format"]["type"] == "json_schema"
+        assert output["format"]["schema"]["properties"].keys() == {"facts"}
+        for absent in ("thinking", "fallbacks", "cache_control", "stream", "temperature", "tools"):
+            assert absent not in request
+        assert not any("fallback" in flag for flag in fake_model.betas[0])
+
+    async def test_retries_one_invalid_answer_once(self, fake_model: RecordingFake) -> None:
+        result = await extract("[[extract_invalid_once]] [[fact:The person uses uv.]]")
+
+        assert result.facts == ["The person uses uv."]
+        assert len(side_requests(fake_model)) == 2
+
+    async def test_a_second_invalid_answer_is_a_typed_error_without_the_text(
+        self, fake_model: RecordingFake
+    ) -> None:
+        with pytest.raises(SideCallInvalid) as failure:
+            await extract("[[extract_invalid]] my private note")
+
+        assert len(side_requests(fake_model)) == 2
+        assert failure.value.__cause__ is None
+        assert failure.value.__suppress_context__ is True
+        assert str(failure.value) == ""
+        assert failure.value.__context__ is None or failure.value.__suppress_context__
+
+    async def test_a_refusal_is_a_typed_error_and_is_not_retried(
+        self, fake_model: RecordingFake
+    ) -> None:
+        with pytest.raises(SideCallRefused):
+            await extract("[[extract_refused]]")
+
+        assert len(side_requests(fake_model)) == 1
+
+    async def test_a_cut_off_answer_is_a_typed_error_and_is_not_retried(
+        self, fake_model: RecordingFake
+    ) -> None:
+        with pytest.raises(SideCallCutOff):
+            await extract("[[extract_cut]]")
+
+        assert len(side_requests(fake_model)) == 1
+
+    async def test_text_before_a_fallback_block_is_ignored(self) -> None:
+        def handler(_request: httpx2.Request) -> httpx2.Response:
+            return message_json(
+                [
+                    {"type": "text", "text": "{broken"},
+                    {"type": "fallback", "from": {"model": "a"}, "to": {"model": "b"}},
+                    {"type": "text", "text": '{"facts": ["ok"]}'},
+                ]
+            )
+
+        async with stub_model(handler):
+            assert (await extract("x")).facts == ["ok"]
+
+    async def test_the_stop_reason_is_read_before_any_text(self) -> None:
+        def handler(_request: httpx2.Request) -> httpx2.Response:
+            return message_json([{"type": "text", "text": '{"facts": ["x"]}'}], "refusal")
+
+        async with stub_model(handler):
+            with pytest.raises(SideCallRefused):
+                await extract("x")
+
+    async def test_logs_usage_with_both_cache_fields_and_no_content(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.services import anthropic as module
+        from tests.support import recording_logger
+
+        logger, sink = recording_logger()
+        monkeypatch.setattr(module, "log", logger)
+
+        def handler(_request: httpx2.Request) -> httpx2.Response:
+            return message_json([{"type": "text", "text": '{"facts": ["secret fact"]}'}])
+
+        async with stub_model(handler):
+            await extract("a private message")
+
+        (line,) = sink.lines
+        assert "usage_in=11" in line
+        assert "usage_out=7" in line
+        assert "cache_write=2" in line
+        assert "cache_read=3" in line
+        assert "private" not in line
+        assert "secret" not in line
+
+    @pytest.mark.parametrize(
+        "error", [httpx2.ReadTimeout("timed out"), httpx2.ConnectError("refused")]
+    )
+    async def test_a_transport_failure_is_model_unavailable(self, error: Exception) -> None:
+        def handler(_request: httpx2.Request) -> httpx2.Response:
+            raise error
+
+        async with stub_model(handler):
+            with pytest.raises(ModelUnavailable):
+                await extract("x")
+
+    async def test_a_rate_limit_is_model_unavailable(self) -> None:
+        def handler(_request: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(
+                429, json={"type": "error", "error": {"type": "rate_limit_error", "message": "x"}}
+            )
+
+        async with stub_model(handler):
+            with pytest.raises(ModelUnavailable):
+                await extract("x")

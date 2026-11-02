@@ -1,5 +1,7 @@
 """The `knowledge` process entry: `python -m app.knowledge_main` serves the MCP server that offers
-the agent one tool, `search`, over the hybrid search (`search_for_tool` of the search module).
+the agent two tools: `search`, over the hybrid search (`search_for_tool` of the search module), and
+`recall`, over one person's memories (`recall_for_tool` of the memory module), whose caller arrives
+in the request's `_meta` and never in the model's arguments.
 
 It is a process of its own so the agent's tool calls reach the index through a boundary the loop
 holds: only the loop, with the bearer token, can call it, and its pool and its concurrency are its
@@ -7,6 +9,8 @@ own, so a burst of searches never takes a connection from the API. It connects `
 nothing else of `infra/` (no bus, no scheduler, no sweep: a second sweep would end the API's live
 runs). With `APP_PROCESS=knowledge` the environment holds only `DATABASE_URL`, `VOYAGE_API_KEY` and
 `KNOWLEDGE_MCP_TOKEN` (`config/env.py`), so no key to the model and no signing secret is here.
+The entry loads the write side and the Anthropic SDK through `api/memory/controller.py`, on
+purpose (a decision, not an accident), and holds no model key.
 
 `uvicorn_options` is a copy of `main.py`'s, because nothing may import the API's entry;
 `tests/test_entry.py` holds the two equal except `host`, which is loopback outside production.
@@ -19,12 +23,16 @@ from typing import Final, NotRequired, TypedDict
 
 import uvicorn
 
+from app.api.memory.controller import recall_for_tool
 from app.api.search.controller import search_for_tool
 from app.config.env import defaulted_secrets, env
 from app.infra.dependency import connect_all, disconnect_all
 from app.infra.postgres import postgres
+from app.models.mcp_server.constants import RECALL_TOOL, SEARCH_TOOL
+from app.models.memory.enums import ToolRecallCode
+from app.models.search.enums import ToolSearchCode
 from app.services.logger import configure_logging, log
-from app.services.mcp import McpApp, serve
+from app.services.mcp import McpApp, ServedTool, ToolFailure, serve
 
 configure_logging()
 
@@ -76,15 +84,37 @@ async def _connected() -> AsyncIterator[None]:
         await disconnect_all([postgres])
 
 
-async def _search(query: str) -> str:
-    return await search_for_tool(query=query)
+def _query_of(arguments: dict[str, object], invalid: ToolSearchCode | ToolRecallCode) -> str:
+    """The one argument a tool takes: exactly `{ query: string }`. Anything else, a field naming a
+    user included, is the tool's `invalid_query` before any work."""
+    query = arguments.get("query")
+    if set(arguments) != {"query"} or not isinstance(query, str):
+        raise ToolFailure(invalid.value)
+    return query
+
+
+async def _search(arguments: dict[str, object], user_id: str | None) -> str:
+    del user_id  # the index is shared: every account searches the same chunks
+    return await search_for_tool(query=_query_of(arguments, ToolSearchCode.invalid_query))
+
+
+async def _recall(arguments: dict[str, object], user_id: str | None) -> str:
+    return await recall_for_tool(
+        query=_query_of(arguments, ToolRecallCode.invalid_query), user_id=user_id
+    )
 
 
 def create_app() -> McpApp:
     """The server, with the store connected around it. Tests import this and enter the SDK's own
     lifespan on the same object."""
     return serve(
-        _search, token=env.knowledge_mcp_token, allowed_hosts=ALLOWED_HOSTS, around=_connected
+        [
+            ServedTool(SEARCH_TOOL, _search, ToolSearchCode.search_unavailable.value),
+            ServedTool(RECALL_TOOL, _recall, ToolRecallCode.recall_unavailable.value),
+        ],
+        token=env.knowledge_mcp_token,
+        allowed_hosts=ALLOWED_HOSTS,
+        around=_connected,
     )
 
 

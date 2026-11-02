@@ -28,8 +28,8 @@ NOTE_TOOL: Final = ListedTool(
 )
 
 
-async def _call(name: str, arguments: dict[str, object]) -> str:
-    del name
+async def _call(name: str, arguments: dict[str, object], user_id: str | None) -> str:
+    del name, user_id
     return f"noted:{arguments.get('text')}"
 
 

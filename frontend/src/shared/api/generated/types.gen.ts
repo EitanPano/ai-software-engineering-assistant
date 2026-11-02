@@ -459,6 +459,39 @@ export type McpServerPage = {
 }
 
 /**
+ * Memory
+ */
+export type Memory = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Content
+   */
+  content: string
+  /**
+   * Conversationid
+   */
+  conversationId: string
+  createdAt: string
+}
+
+/**
+ * MemoryPage
+ */
+export type MemoryPage = {
+  /**
+   * Items
+   */
+  items: Array<Memory>
+  /**
+   * Nextcursor
+   */
+  nextCursor: string | null
+}
+
+/**
  * Message
  */
 export type Message = {
@@ -2419,3 +2452,88 @@ export type PutApiToolPolicyByMcpServerIdByToolNameResponses = {
 
 export type PutApiToolPolicyByMcpServerIdByToolNameResponse =
   PutApiToolPolicyByMcpServerIdByToolNameResponses[keyof PutApiToolPolicyByMcpServerIdByToolNameResponses]
+
+export type GetApiMemoryData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Cursor
+     */
+    cursor?: string
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: '/api/memory'
+}
+
+export type GetApiMemoryErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type GetApiMemoryError = GetApiMemoryErrors[keyof GetApiMemoryErrors]
+
+export type GetApiMemoryResponses = {
+  /**
+   * A page of the caller's memories, newest first
+   */
+  200: MemoryPage
+}
+
+export type GetApiMemoryResponse = GetApiMemoryResponses[keyof GetApiMemoryResponses]
+
+export type DeleteApiMemoryByIdData = {
+  body?: never
+  path: {
+    /**
+     * Id
+     */
+    id: string
+  }
+  query?: never
+  url: '/api/memory/{id}'
+}
+
+export type DeleteApiMemoryByIdErrors = {
+  /**
+   * Validation failed
+   */
+  400: ErrorBody
+  /**
+   * Unauthenticated
+   */
+  401: ErrorBody
+  /**
+   * Not found
+   */
+  404: ErrorBody
+  /**
+   * Unexpected error
+   */
+  500: ErrorBody
+}
+
+export type DeleteApiMemoryByIdError = DeleteApiMemoryByIdErrors[keyof DeleteApiMemoryByIdErrors]
+
+export type DeleteApiMemoryByIdResponses = {
+  /**
+   * The memory is deleted
+   */
+  204: void
+}
+
+export type DeleteApiMemoryByIdResponse =
+  DeleteApiMemoryByIdResponses[keyof DeleteApiMemoryByIdResponses]

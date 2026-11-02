@@ -14,7 +14,7 @@ from typing import Final
 from app.services.db import Executor, execute, fetch_one
 
 MIGRATION: Final = "0009-mcp-server.sql"
-MIGRATIONS: Final = (MIGRATION, "0011-github-mcp-server.sql")
+MIGRATIONS: Final = (MIGRATION, "0011-github-mcp-server.sql", "0012-memory.sql")
 SEEDABLE_SUFFIXES: Final = ("_test", "_e2e")
 _SEEDS: Final = re.compile(
     r"^insert into (?:mcp_server|tool_policy)\b.*?;", re.DOTALL | re.MULTILINE

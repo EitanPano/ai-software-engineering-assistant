@@ -66,6 +66,7 @@ SEEDED = (
         _Policy("github-list_issues", "github", "list_issues", "allow"),
         _Policy("github-list_pull_requests", "github", "list_pull_requests", "allow"),
         _Policy("github-pull_request_read", "github", "pull_request_read", "allow"),
+        _Policy("knowledge-recall", "knowledge", "recall", "allow"),
         _Policy("knowledge-search", "knowledge", "search", "allow"),
     ],
 )
@@ -75,13 +76,15 @@ class TestSeedStatements:
     def test_are_the_inserts_of_both_migrations_in_file_order(self) -> None:
         statements = seed_statements()
 
-        assert len(statements) == 4
+        assert len(statements) == 5
         assert [statement.split("(", 1)[0].strip() for statement in statements] == [
             "insert into mcp_server",
             "insert into tool_policy",
             "insert into mcp_server",
             "insert into tool_policy",
+            "insert into tool_policy",
         ]
+        assert "'knowledge-recall'" in statements[4]
         assert all(statement.endswith(";") for statement in statements)
         assert "'github'" in statements[2]
 

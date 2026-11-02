@@ -14,11 +14,13 @@ from app.infra.pubsub import SubscriberEntry, Unsubscribe, pubsub
 
 __all__ = [
     "EVAL_RUN_QUEUED",
+    "RUN_COMPLETED",
     "RUN_CREATED",
     "RUN_RESUMED",
     "SOURCE_QUEUED",
     "USER_REGISTERED",
     "EvalRunQueued",
+    "RunCompleted",
     "RunCreated",
     "RunResumed",
     "SourceQueued",
@@ -63,6 +65,15 @@ class RunResumed(TypedDict):
 # Published by the approval controller after the last pending decision of a run; the agent resumes
 # the run.
 RUN_RESUMED: Final = Topic[RunResumed]("run.resumed")
+
+
+class RunCompleted(TypedDict):
+    run_id: str
+
+
+# Published by the agent after a run ended `completed` (resumed or not); memory extraction reads
+# that run's user message.
+RUN_COMPLETED: Final = Topic[RunCompleted]("run.completed")
 
 
 class SourceQueued(TypedDict):

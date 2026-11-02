@@ -11,6 +11,7 @@ import httpx2
 import pytest
 
 from app.config.constants import MCP
+from app.models.mcp_server.constants import CALLER_META_KEY
 from app.models.mcp_server.type import ListedTool
 from app.services import mcp
 from app.services.logger import configure_logging
@@ -20,6 +21,7 @@ from app.services.mcp import (
     ToolFailure,
     build_app,
     call_tool,
+    caller_of,
     list_tools,
 )
 from tests.fake_github_mcp import (
@@ -44,10 +46,12 @@ ECHO = ListedTool(
     },
 )
 calls: list[tuple[str, dict[str, object]]] = []
+callers: list[str | None] = []
 
 
-async def handler(name: str, arguments: dict[str, object]) -> str:
+async def handler(name: str, arguments: dict[str, object], user_id: str | None) -> str:
     calls.append((name, arguments))
+    callers.append(user_id)
     if name == "fail":
         raise ToolFailure("busy")
     if name == "slow":
@@ -58,6 +62,7 @@ async def handler(name: str, arguments: dict[str, object]) -> str:
 @pytest.fixture(autouse=True)
 def forget_calls() -> None:
     calls.clear()
+    callers.clear()
 
 
 @pytest.fixture
@@ -115,6 +120,42 @@ class TestClient:
         )
 
         assert sorted(result.text for result in results) == [f"echo:{i}" for i in range(4)]
+
+
+@pytest.mark.usefixtures("server")
+class TestCallerMeta:
+    async def test_the_user_id_travels_in_meta_and_not_in_the_arguments(self) -> None:
+        await call_tool(URL, "echo", {"text": "hi"}, token=TOKEN, user_id="user-1")
+
+        assert callers == ["user-1"]
+        assert calls == [("echo", {"text": "hi"})]
+
+    async def test_a_call_with_no_user_id_has_no_caller(self) -> None:
+        await call_tool(URL, "echo", {"text": "hi"}, token=TOKEN)
+
+        assert callers == [None]
+
+
+class TestCallerOf:
+    @pytest.mark.parametrize(
+        "meta",
+        [
+            None,
+            {},
+            {"other": "x"},
+            {CALLER_META_KEY: 5},
+            {CALLER_META_KEY: ""},
+            {CALLER_META_KEY: ["a"]},
+            {CALLER_META_KEY: "x" * 129},
+        ],
+    )
+    def test_a_missing_or_malformed_meta_has_no_caller(
+        self, meta: dict[str, object] | None
+    ) -> None:
+        assert caller_of(meta) is None
+
+    def test_a_string_is_the_caller(self) -> None:
+        assert caller_of({CALLER_META_KEY: "user-1"}) == "user-1"
 
 
 @pytest.mark.usefixtures("server")

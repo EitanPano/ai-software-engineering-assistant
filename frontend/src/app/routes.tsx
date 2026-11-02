@@ -5,6 +5,7 @@ import { conversationListQuery, conversationQuery } from '@/entity/conversation/
 import { evalRunListQuery, evalRunQuery } from '@/entity/eval-run/api/eval-run'
 import { healthQuery } from '@/entity/health/api/health'
 import { mcpServerListQuery, mcpServerQuery } from '@/entity/mcp-server/api/mcp-server'
+import { memoryListQuery } from '@/entity/memory/api/memory'
 import { messageListQuery } from '@/entity/message/api/message'
 import { sourceListQuery } from '@/entity/source/api/source'
 import { toolPolicyQuery } from '@/entity/tool-policy/api/tool-policy'
@@ -26,6 +27,7 @@ import SiteLoading from './(site)/loading'
 import SiteNotFound from './(site)/not-found'
 import HomePage from './(site)/page'
 import ProfilePage from './(site)/profile/page'
+import MemoryPage from './(site)/memory/page'
 import ListingError from './(site)/mcp-server/[id]/listing/error'
 import ListingPage from './(site)/mcp-server/[id]/listing/page'
 import McpServerPage from './(site)/mcp-server/[id]/page'
@@ -84,6 +86,15 @@ export function createRoutes(queryClient: QueryClient): RouteObject[] {
                     return queryClient.infiniteQuery(conversationListQuery())
                   },
                   Component: ConversationListPage,
+                },
+                {
+                  path: 'memory',
+                  loader: async ({ request }) => {
+                    await requireAccount(queryClient, returnToOf(request))
+                    // Throws on failure (prefetch would swallow it), so the group's boundary shows.
+                    return queryClient.infiniteQuery(memoryListQuery())
+                  },
+                  Component: MemoryPage,
                 },
                 {
                   path: 'conversation/:id',

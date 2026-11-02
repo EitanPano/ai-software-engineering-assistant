@@ -51,6 +51,7 @@ from app.models.run.enums import RunErrorCode, RunEventType, RunStatus, ToolCall
 from app.models.run.interface import PendingTurn, RunRecord
 from app.services import tool
 from app.services.anthropic import Block, ModelUnavailable, TurnResult, served_blocks, stream_turn
+from app.services.event import RUN_COMPLETED, publish
 from app.services.logger import log
 from app.services.security.crypto import constant_time_equals
 from app.services.utils.jsonb import jsonb_safe
@@ -205,9 +206,14 @@ def _cut(output: str) -> str:
     return output[: AGENT_TOOL_OUTPUT_MAX_CHARS - len(_CUT_NOTE)] + _CUT_NOTE
 
 
-async def _execute(cleared: _Cleared) -> _Call:
+async def _execute(cleared: _Cleared, user_id: str) -> _Call:
+    """Runs a cleared call. `user_id` is the run's owner: it is the caller of a `knowledge` tool,
+    sent beside the arguments and never in them."""
     outcome = await call_server_tool(
-        server=cleared.server, tool_name=cleared.tool_name, arguments=cleared.arguments
+        server=cleared.server,
+        tool_name=cleared.tool_name,
+        arguments=cleared.arguments,
+        user_id=user_id,
     )
     return _Call(outcome.status, _cut(outcome.output), cleared.server.id, cleared.tool_name)
 
@@ -232,7 +238,7 @@ async def _finished(run_id: str, tool_use_id: str, call: _Call) -> Block:
 
 
 async def _call_tool(
-    run_id: str, block: Block, prefix: ConversationPrefix, *, allowed: bool
+    run_id: str, user_id: str, block: Block, prefix: ConversationPrefix, *, allowed: bool
 ) -> Block | HeldCall:
     """One `tool_use` block to its `tool_result` block, with the two events around it and the
     `tool_call` row. A call past the run's budget is a fixed `is_error` result with no server
@@ -260,7 +266,7 @@ async def _call_tool(
             # code does not know never reaches a server.
             return HeldCall(tool_use_id, cleared.server.id, cleared.tool_name, cleared.arguments)
         else:
-            call = await _execute(cleared)
+            call = await _execute(cleared, user_id)
     else:
         call = _Call(ToolCallStatus.failed, _INVALID_INPUT_OUTPUT, *_ids(await _owner(name)))
     await record_tool_call(
@@ -370,7 +376,7 @@ async def _answer_tools(
     # for a person does not wait here: the others run now and their results wait with the turn.
     answers = await asyncio.gather(
         *(
-            _call_tool(run.id, call, prefix, allowed=position < remaining)
+            _call_tool(run.id, run.user_id, call, prefix, allowed=position < remaining)
             for position, call in enumerate(calls)
         )
     )
@@ -433,7 +439,7 @@ async def _decided_call(
             # whatever the name in the pending turn resolves to now.
             call = refused
         else:
-            call = await _execute(cleared)
+            call = await _execute(cleared, run.user_id)
     await end_waiting_call(run.id, found.tool_use_id, call.status, call.output)
     return await _finished(run.id, found.tool_use_id, call)
 
@@ -490,7 +496,11 @@ async def _carry_out(run: RunRecord, work: Callable[[], Awaitable[_Outcome]]) ->
     if outcome.status is RunStatus.awaiting_approval:
         # Paused: the run is at rest in the store, no `run_finished`, nothing left running.
         return
-    await finish_run(run.id, outcome.status, outcome.error_code)
+    if await finish_run(run.id, outcome.status, outcome.error_code) and (
+        outcome.status is RunStatus.completed
+    ):
+        # After the run's last event has committed; memory extraction reacts, detached from here.
+        await publish(RUN_COMPLETED, {"run_id": run.id})
 
 
 async def execute_run(run_id: str) -> None:

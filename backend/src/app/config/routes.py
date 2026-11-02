@@ -14,6 +14,7 @@ from app.api.conversation.routes import router as conversation_router
 from app.api.eval.routes import router as eval_router
 from app.api.health.routes import router as health_router
 from app.api.mcp_server.routes import router as mcp_server_router
+from app.api.memory.routes import router as memory_router
 from app.api.run.routes import router as run_router
 from app.api.search.routes import router as search_router
 from app.api.source.routes import router as source_router
@@ -33,3 +34,4 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(eval_router, prefix="/api/eval-run")
     app.include_router(mcp_server_router, prefix="/api/mcp-server")
     app.include_router(tool_policy_router, prefix="/api/tool-policy")
+    app.include_router(memory_router, prefix="/api/memory")

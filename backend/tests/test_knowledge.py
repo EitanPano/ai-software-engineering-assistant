@@ -10,9 +10,10 @@ import httpx
 import httpx2
 import pytest
 
+from app.api.memory import controller as memory_controller
 from app.api.search import controller as search_controller
-from app.config.constants import KNOWLEDGE
-from app.models.mcp_server.constants import SEARCH_TOOL
+from app.config.constants import KNOWLEDGE, MEMORY
+from app.models.mcp_server.constants import RECALL_TOOL, SEARCH_TOOL
 from app.models.search.interface import SearchHitRecord, SearchOutcome
 from app.services import mcp
 from app.services.mcp import McpApp, McpUnavailable
@@ -36,6 +37,7 @@ from tests.knowledge_support import (
 from tests.knowledge_support import (
     knowledge as knowledge,
 )
+from tests.memory_support import FACT, remember
 from tests.store import reset_store, store_backed
 from tests.support import recording_logger
 
@@ -66,21 +68,22 @@ def a_hit(n: int, content: str) -> SearchHitRecord:
 
 class TestDefinition:
     @pytest.mark.usefixtures("knowledge")
-    async def test_offers_one_strict_tool_with_the_schema_we_wrote(self) -> None:
+    async def test_offers_two_strict_tools_with_the_schemas_we_wrote(self) -> None:
         tools = await listed_tools()
 
-        assert tools == [SEARCH_TOOL]
-        schema = tools[0].input_schema
-        assert schema["additionalProperties"] is False
-        assert schema["required"] == ["query"]
+        assert tools == [SEARCH_TOOL, RECALL_TOOL]
+        for tool in tools:
+            assert tool.input_schema["additionalProperties"] is False
+            assert tool.input_schema["required"] == ["query"]
+            assert set(tool.input_schema["properties"]) == {"query"}  # type: ignore[call-overload]
 
-    def test_the_schema_has_no_limit_and_no_length_keyword(self) -> None:
-        """`strict` refuses `minimum` and `maxLength`, and the tool takes no `limit`: the server
-        bounds an answer, not the model."""
-        text = json.dumps(SEARCH_TOOL.input_schema)
-
-        for keyword in ("limit", "minimum", "maximum", "minLength", "maxLength"):
-            assert keyword not in text
+    def test_the_schemas_have_no_limit_no_user_and_no_length_keyword(self) -> None:
+        """`strict` refuses `minimum` and `maxLength`, a tool takes no `limit` (the server bounds an
+        answer, not the model) and `recall` takes no user (the caller travels in `_meta`)."""
+        for tool in (SEARCH_TOOL, RECALL_TOOL):
+            text = json.dumps(tool.input_schema)
+            for keyword in ("limit", "minimum", "maximum", "minLength", "maxLength", "user"):
+                assert keyword not in text
 
 
 @store_backed
@@ -341,6 +344,110 @@ class TestBounds:
         assert KNOWLEDGE.hit_limit == 10
 
 
+async def call_recall(query: str, user_id: str | None = "user-a") -> mcp.ToolResult:
+    return await mcp.call_tool(
+        KNOWLEDGE_URL, "recall", {"query": query}, token=TOKEN, user_id=user_id
+    )
+
+
+@store_backed
+@pytest.mark.usefixtures("empty_store", "fakes", "knowledge")
+class TestRecallTool:
+    async def test_returns_the_callers_memories_nearest_first_with_the_documented_fields_only(
+        self,
+    ) -> None:
+        await remember("user-a", "Unrelated fact about gardening.")
+        await remember("user-a", FACT)
+        await remember("user-b", FACT)
+
+        result = await call_recall(FACT)
+
+        assert result.is_error is False
+        memories = json.loads(result.text)["memories"]
+        assert [m["content"] for m in memories] == [FACT, "Unrelated fact about gardening."]
+        assert set(memories[0]) == {"content", "createdAt"}
+
+    async def test_answers_at_most_the_recall_limit(self) -> None:
+        for n in range(MEMORY.recall_limit + 3):
+            await remember("user-a", f"Fact number {n}.")
+
+        result = await call_recall("Fact number 1.")
+
+        assert len(json.loads(result.text)["memories"]) == MEMORY.recall_limit
+
+    async def test_none_remembered_is_a_success_not_an_error(self) -> None:
+        result = await call_recall("anything")
+
+        assert (result.is_error, json.loads(result.text)) == (False, {"memories": []})
+
+    @pytest.mark.parametrize("query", ["", "   ", "a" * 501, "bad\x00query"])
+    async def test_a_bad_query_is_invalid_query_and_embeds_nothing(self, query: str) -> None:
+        fake_voyage.state.requests.clear()
+
+        result = await call_recall(query)
+
+        assert (result.is_error, result.text) == (True, "invalid_query")
+        assert fake_voyage.state.requests == []
+
+    async def test_voyage_down_is_recall_unavailable(self) -> None:
+        result = await call_recall("anything [[fail:recall-down]]")
+
+        assert (result.is_error, result.text) == (True, "recall_unavailable")
+
+    async def test_an_unexpected_failure_is_recall_unavailable_without_its_text(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def broken(text: str) -> list[float]:
+            del text
+            raise RuntimeError("secret internal detail from the provider")
+
+        monkeypatch.setattr(memory_controller, "embed_query", broken)
+
+        result = await call_recall("anything")
+
+        assert (result.is_error, result.text) == (True, "recall_unavailable")
+        assert "secret" not in result.text
+
+    async def test_shares_the_search_slots_and_is_busy_when_they_are_taken(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        release = asyncio.Event()
+        entered = asyncio.Event()
+
+        async def slow(*, text: str, limit: int) -> SearchOutcome:
+            del text, limit
+            entered.set()
+            await release.wait()
+            return SearchOutcome(hits=[], incomplete=False)
+
+        monkeypatch.setattr(search_controller, "search_knowledge_base", slow)
+        monkeypatch.setattr(
+            search_controller,
+            "KNOWLEDGE",
+            replace(KNOWLEDGE, concurrent_searches=1, slot_wait_seconds=0.2),
+        )
+        search = asyncio.create_task(call_search("one"))
+        await entered.wait()
+
+        refused = await call_recall("two")
+        release.set()
+        await search
+
+        assert (refused.is_error, refused.text) == (True, "busy")
+
+    async def test_logs_lengths_and_counts_never_the_query_or_a_memory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await remember("user-a", "A PRIVATE-77 memory.")
+        logger, sink = recording_logger()
+        monkeypatch.setattr(memory_controller, "log", logger)
+
+        await call_recall("PRIVATE-77 query")
+
+        assert any("queryLength" in line for line in sink.lines)
+        assert "PRIVATE-77" not in "\n".join(sink.lines)
+
+
 @pytest.mark.usefixtures("knowledge")
 class TestAccess:
     """The bearer token: no token or a wrong one is a 401 that embeds nothing and reaches no
@@ -411,4 +518,4 @@ class TestAccess:
     async def test_the_api_reaches_it_by_its_compose_name(self) -> None:
         mcp_host = httpx2.URL(KNOWLEDGE_URL).host
         assert mcp_host == "knowledge"
-        assert len(await listed_tools()) == 1
+        assert [tool.name for tool in await listed_tools()] == ["search", "recall"]

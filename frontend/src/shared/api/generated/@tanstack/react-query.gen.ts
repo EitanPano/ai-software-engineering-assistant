@@ -4,6 +4,7 @@ import { queryOptions, type UseMutationOptions } from '@tanstack/react-query'
 
 import { client } from '../client.gen'
 import {
+  deleteApiMemoryById,
   getApiConversation,
   getApiConversationById,
   getApiConversationByIdMessage,
@@ -14,6 +15,7 @@ import {
   getApiMcpServer,
   getApiMcpServerById,
   getApiMcpServerByIdListing,
+  getApiMemory,
   getApiSearch,
   getApiSource,
   getApiToolPolicyByMcpServerId,
@@ -39,6 +41,9 @@ import {
   putApiToolPolicyByMcpServerIdByToolName,
 } from '../sdk.gen'
 import type {
+  DeleteApiMemoryByIdData,
+  DeleteApiMemoryByIdError,
+  DeleteApiMemoryByIdResponse,
   GetApiConversationByIdData,
   GetApiConversationByIdError,
   GetApiConversationByIdMessageData,
@@ -69,6 +74,9 @@ import type {
   GetApiMcpServerData,
   GetApiMcpServerError,
   GetApiMcpServerResponse,
+  GetApiMemoryData,
+  GetApiMemoryError,
+  GetApiMemoryResponse,
   GetApiSearchData,
   GetApiSearchError,
   GetApiSearchResponse,
@@ -991,6 +999,58 @@ export const putApiToolPolicyByMcpServerIdByToolNameMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await putApiToolPolicyByMcpServerIdByToolName({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getApiMemoryQueryKey = (options?: Options<GetApiMemoryData>) =>
+  createQueryKey('getApiMemory', options)
+
+/**
+ * List the caller's memories
+ */
+export const getApiMemoryOptions = (options?: Options<GetApiMemoryData>) =>
+  queryOptions<
+    GetApiMemoryResponse,
+    GetApiMemoryError,
+    GetApiMemoryResponse,
+    ReturnType<typeof getApiMemoryQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getApiMemory({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getApiMemoryQueryKey(options),
+  })
+
+/**
+ * Delete one of the caller's memories
+ */
+export const deleteApiMemoryByIdMutation = (
+  options?: Partial<Options<DeleteApiMemoryByIdData>>,
+): UseMutationOptions<
+  DeleteApiMemoryByIdResponse,
+  DeleteApiMemoryByIdError,
+  Options<DeleteApiMemoryByIdData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteApiMemoryByIdResponse,
+    DeleteApiMemoryByIdError,
+    Options<DeleteApiMemoryByIdData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteApiMemoryById({
         ...options,
         ...fnOptions,
         throwOnError: true,

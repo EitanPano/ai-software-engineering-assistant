@@ -34,6 +34,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
       LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
+      LLM_SIDE_MODEL: ${LLM_SIDE_MODEL:-claude-haiku-5-5}
       # Which process this is; required in production.
       APP_PROCESS: backend
       # How the agent reaches the `knowledge` MCP server, and the bearer token both share. The
@@ -93,6 +94,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
       LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
+      LLM_SIDE_MODEL: ${LLM_SIDE_MODEL:-claude-haiku-5-5}
       APP_PROCESS: backend
       KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
       GITHUB_MCP_URL: http://github-gateway:8002/mcp
@@ -105,9 +107,11 @@ services:
       database:
         condition: service_healthy
   knowledge:
-    # The `knowledge` MCP server: the agent's one tool, `search`, over the hybrid search. The
-    # backend's image and a process of its own, so its pool and its concurrency are its own. No
-    # published port: only the backend, on this network and with the bearer token, can call it.
+    # The `knowledge` MCP server: the agent's two tools, `search`, over the hybrid search, and
+    # `recall`, over a person's memories. It now reads every person's memories (the caller arrives
+    # in the request's `_meta`), not only the shared index. The backend's image and a process of
+    # its own, so its pool and its concurrency are its own. No published port: only the backend,
+    # on this network and with the bearer token, can call it.
     build:
       context: ./backend
       additional_contexts:

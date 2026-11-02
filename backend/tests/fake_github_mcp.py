@@ -54,9 +54,14 @@ class Github:
 
     tools: list[ListedTool] = field(default_factory=recorded_tools)
     calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    # The caller each call's `_meta` named; GitHub is sent none, so each is `None`.
+    callers: list[str | None] = field(default_factory=list)
 
-    async def call(self, name: str, arguments: dict[str, object]) -> str | ToolReply:
+    async def call(
+        self, name: str, arguments: dict[str, object], user_id: str | None
+    ) -> str | ToolReply:
         self.calls.append((name, arguments))
+        self.callers.append(user_id)
         owner, repo = _text(arguments.get("owner")), _text(arguments.get("repo"))
         match name:
             case "get_file_contents":

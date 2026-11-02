@@ -51,6 +51,22 @@ apart. A marker is `[[name]]` or `[[name:key]]`:
   no answer (no hits, or an error result). When the request does not offer the tool, it says it
   cannot search and calls nothing.
 
+- `[[recall]]`: asks for `knowledge__recall` with `{"query": RECALL_QUERY}`, then answers from the
+  last tool result: `From memory: <content>; <content>` (each memory, best first), or `Nothing is
+  remembered.` for an empty list or an error result. When the request does not offer the tool, it
+  says it cannot recall and calls nothing.
+
+A request without `stream` is a side call (memory extraction, `parse_turn` in
+`services/anthropic.py`), answered as one JSON message, not a script above:
+
+- `[[fact:TEXT]]` (TEXT is anything up to `]]`, spaces included; repeatable): the answer is
+  `{"facts": [TEXT, ...]}`, in order. A message with no `fact` marker has no facts.
+- `[[extract_refused]]`: `stop_reason: refusal`, no content. `[[extract_cut]]`: `max_tokens` with
+  half a JSON text. `[[extract_invalid]]`: text that is not JSON, every time.
+  `[[extract_invalid_once]]`: that text the first time the message is seen, valid afterwards.
+- It is refused (400) when it sends `fallbacks`, `tools`, `temperature`, `top_p`, `top_k`, a
+  `thinking` that is not adaptive, no `output_config.effort`, or a format schema `strict` refuses.
+
 A request is also checked for what the real API refuses: an empty turn, a `tool_use` input that is
 not an object, a `tool_use` whose next user turn lacks its `tool_result`, a replayed `thinking`
 block whose prefix changed, and a `strict` tool whose schema holds a keyword `strict` does not
@@ -76,6 +92,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from tests.fixture_repository import KEYWORD_QUERY, SEMANTIC_QUERY
 
 MARKER: Final = re.compile(r"\[\[([a-z_]+)(?::([A-Za-z0-9_-]+))?\]\]")
+# `[[fact:TEXT]]`: TEXT is anything up to `]]`, spaces included, unlike the other markers.
+FACT_MARKER: Final = re.compile(r"\[\[fact:(.+?)\]\]", re.DOTALL)
 ANSWER_CHUNKS: Final = ("Hello! ", "This is the **scripted** answer.\n\n", "- one\n", "- two\n")
 HOLD_CHUNKS: Final = ("The first part. ", "The rest, **done**.")
 TOOL_DONE: Final = "Tool done."
@@ -108,6 +126,11 @@ GITHUB_ARGUMENTS: Final[dict[str, dict[str, object]]] = {
     },
     "github__get_file_contents": {"owner": "octo-org", "repo": "hello-world", "path": "README.md"},
 }
+# `[[recall]]` asks for what the person told the assistant, then answers from the result.
+RECALL_TOOL: Final = "knowledge__recall"
+RECALL_QUERY: Final = "what the person told the assistant before"
+NOTHING_REMEMBERED: Final = "Nothing is remembered."
+NOT_RECALLABLE: Final = "I cannot recall anything right now."
 NO_ANSWER: Final = "The knowledge base holds no answer to that."
 NOT_OFFERED: Final = "I cannot search the knowledge base right now."
 HOLD_TIMEOUT_SECONDS: Final = 30.0
@@ -464,6 +487,8 @@ def _arguments_for(name: str) -> Json:
     recorded schema requires, the scripted tools a text."""
     if name == SEARCH_TOOL:
         return {"query": SEMANTIC_QUERY}
+    if name == RECALL_TOOL:
+        return {"query": RECALL_QUERY}
     if name in GITHUB_ARGUMENTS:
         return dict(GITHUB_ARGUMENTS[name])
     return {"text": "hi"}
@@ -496,6 +521,42 @@ async def _research(results: list[str], offered: set[str]) -> AsyncIterator[byte
         return
     else:
         text = _cited(results[-1])
+    async for part in _chunks(0, (text,)):
+        yield part
+    for part in _message_end("end_turn"):
+        yield part
+
+
+def _remembered(result: str) -> str:
+    """The answer a recall run gives from its tool result: each memory's content, best first, or
+    that nothing is remembered (an empty list and an error result are the same to a reader)."""
+    try:
+        parsed = json.loads(result)
+    except ValueError:
+        return NOTHING_REMEMBERED
+    memories = parsed.get("memories") if isinstance(parsed, dict) else None
+    contents = [
+        str(memory["content"])
+        for memory in memories or []
+        if isinstance(memory, dict) and "content" in memory
+    ]
+    return f"From memory: {'; '.join(contents)}" if contents else NOTHING_REMEMBERED
+
+
+async def _recall(results: list[str], offered: set[str]) -> AsyncIterator[bytes]:
+    """`[[recall]]`: asks `knowledge__recall`, then answers from its result. Without the tool (a
+    conversation started before it existed, or a server that was down) it says so and calls
+    nothing."""
+    if RECALL_TOOL not in offered:
+        text = NOT_RECALLABLE
+    elif not results:
+        for part in _tool_use(0, RECALL_TOOL, {"query": RECALL_QUERY}):
+            yield part
+        for part in _message_end("tool_use"):
+            yield part
+        return
+    else:
+        text = _remembered(results[-1])
     async for part in _chunks(0, (text,)):
         yield part
     for part in _message_end("end_turn"):
@@ -564,6 +625,10 @@ async def script(
 
     if "research" in marks:
         async for part in _research(results or [], offered or set()):
+            yield part
+        return
+    if "recall" in marks:
+        async for part in _recall(results or [], offered or set()):
             yield part
         return
 
@@ -700,6 +765,75 @@ async def script(
         yield part
 
 
+# `[[extract_invalid_once]]` answers invalid text the first time a message is seen, then valid.
+_invalid_once_seen: set[str] = set()
+
+
+def side_call_problem(body: Json) -> str | None:
+    """What the real API refuses in a side call (a non-streamed request with a structured output):
+    the parameters that return 400 on the current models, and a format schema `strict` would not
+    accept. A side call never sends `fallbacks`, so one that does is refused here."""
+    for name in ("temperature", "top_p", "top_k", "fallbacks", "tools", "tool_choice"):
+        if name in body:
+            return f"{name}: not part of a side call"
+    thinking = body.get("thinking")
+    if isinstance(thinking, dict) and thinking.get("type") != "adaptive":
+        return "thinking: only adaptive is accepted"
+    output = body.get("output_config")
+    if not isinstance(output, dict) or output.get("effort") not in {"low", "medium", "high"}:
+        return "output_config.effort must be set explicitly"
+    format_ = output.get("format")
+    if not isinstance(format_, dict) or format_.get("type") != "json_schema":
+        return "output_config.format must be a json_schema"
+    return _schema_problem(format_.get("schema"), "output_config.format.schema")
+
+
+def side_facts(text: str) -> list[str]:
+    """The facts an extraction side call should return: each `[[fact:TEXT]]` marker of the message
+    (TEXT is anything but `]]`), in order."""
+    return [match.group(1).strip() for match in FACT_MARKER.finditer(text)]
+
+
+def _side_message(model: str, text: str | None, stop_reason: str = "end_turn") -> JSONResponse:
+    content: list[Json] = [] if text is None else [{"type": "text", "text": text}]
+    return JSONResponse(
+        {
+            "id": f"msg_{uuid.uuid4().hex[:12]}",
+            "type": "message",
+            "role": "assistant",
+            "model": model,
+            "content": content,
+            "stop_reason": stop_reason,
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        }
+    )
+
+
+def side_call(body: Json, text: str) -> JSONResponse:
+    """The answer to a non-streamed request: memory extraction. `[[fact:TEXT]]` markers become the
+    `facts`; `[[extract_refused]]`, `[[extract_cut]]`, `[[extract_invalid]]` and
+    `[[extract_invalid_once]]` script the failures; a message with no marker has no facts."""
+    model = body.get("model")
+    name = model if isinstance(model, str) else "fake"
+    marks = markers_of(text)
+    if "extract_refused" in marks:
+        return _side_message(name, None, "refusal")
+    if "extract_cut" in marks:
+        return _side_message(name, '{"facts": ["', "max_tokens")
+    if "extract_invalid" in marks:
+        return _side_message(name, "these are not facts")
+    if "extract_invalid_once" in marks and text not in _invalid_once_seen:
+        _invalid_once_seen.add(text)
+        return _side_message(name, "these are not facts")
+    return _side_message(name, json.dumps({"facts": side_facts(text)}))
+
+
 async def messages(request: Request) -> Response:
     body = await request.json()
     if not isinstance(body, dict):
@@ -708,12 +842,15 @@ async def messages(request: Request) -> Response:
         request_problem(body.get("messages"))
         or tool_problem(body.get("tools"))
         or binding_problem(body)
+        or (None if body.get("stream") else side_call_problem(body))
     )
     if problem is not None:
         return JSONResponse(
             {"type": "error", "error": {"type": "invalid_request_error", "message": problem}}, 400
         )
     text, continuation = script_text(body.get("messages"))
+    if not body.get("stream"):
+        return side_call(body, text)
     model = body.get("model")
     sent = body.get("messages")
     return StreamingResponse(
