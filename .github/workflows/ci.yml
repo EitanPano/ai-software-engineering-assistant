@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.12.23
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install the backend
+        working-directory: backend
+        run: uv sync --locked
+      - name: Install the frontend
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun x playwright install --with-deps chromium
+      # The diff checks need a base; a branch's first push has none to compare against.
+      - name: Verify
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          args=(--out .orchestrate/ci)
+          if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then args+=(--base "$BEFORE"); fi
+          node scripts/verify.mjs "${args[@]}"
+      - name: Keep the evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify
+          path: |
+            .orchestrate/ci/
+            frontend/test-results/
+          retention-days: 7
+
+  # `verify` never starts the image, so this is what catches a production-only failure: a package
+  # in the dev group, a broken Dockerfile, a migration that fails on an empty database. The `github`
+  # profile starts the gateway too: its `/health` reaches no upstream, so a random PAT is enough.
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build, migrate and start the production image
+        env:
+          DATABASE_URL: postgres://app:app@database:5432/app
+        run: |
+          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET OTP_SECRET ENCRYPTION_KEY ANTHROPIC_API_KEY VOYAGE_API_KEY KNOWLEDGE_MCP_TOKEN GITHUB_MCP_PAT GITHUB_MCP_TOKEN; do
+            export "$name=$(openssl rand -base64 32)"
+          done
+          docker compose --profile app --profile github up --build --wait --wait-timeout 120
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8000/
+      - name: Show the logs
+        if: failure()
+        run: docker compose --profile app --profile github logs --no-color
+
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # safe.directory: the container's user does not own the mounted checkout.
+      - name: Scan the history
+        run: >-
+          docker run --rm -v "$PWD:/repo"
+          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --redact --no-banner

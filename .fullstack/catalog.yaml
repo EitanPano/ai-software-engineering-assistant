@@ -1,0 +1,63 @@
+schemaVersion: 1
+catalog:
+  repository: https://github.com/EitanPano/fullstack-templates
+  version: v1.5.1
+  commit: 87820a390724679a037863a58627549fd9488d4d
+generatedAt: 2026-10-30T15:23:02.959Z
+stack: react-python-fastapi
+deploy: single
+packages:
+  backend:
+    template: server/python-fastapi
+    version: 1.2.1
+    flags:
+      auth: true
+    capabilities:
+      database: postgres
+    commands:
+      install: uv sync
+      dev: uv run python -m app.main --reload
+      check: uv run poe check
+      typecheck: uv run poe typecheck
+      lint: uv run poe lint
+      format: uv run poe format
+      test: uv run poe test
+      start: uv run python -m app.main
+      contract: uv run poe contract
+      testDb: uv run poe test-db
+      e2eDb: uv run poe e2e-db
+      migrate: uv run poe migrate
+    http:
+      port: 8000
+      health: /api/health
+      ready: /api/health/ready
+  frontend:
+    template: frontend/react
+    version: 2.1.1
+    flags: {}
+    capabilities: {}
+    commands:
+      install: bun install
+      dev: bun run dev
+      check: bun run check
+      typecheck: bun run typecheck
+      lint: bun run lint
+      format: bun run format
+      test: bun run test
+      testE2e: bun run test:e2e
+      contract: bun run api:types
+    http:
+      port: 5173
+      health: /
+providers:
+  database: postgres
+answers:
+  projectName: ai-software-engineering-assistant
+  brand:
+    displayName: AI Software Engineering Assistant
+    primary: "#0f766e"
+    neutral: "#64748b"
+    radius: md
+    font: inter
+    theme: system
+    density: compact

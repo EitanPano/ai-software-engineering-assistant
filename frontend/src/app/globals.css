@@ -1,0 +1,118 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/inter';
+
+@custom-variant dark (&:where(.dark, .dark *));
+/* Fine-pointer control heights shrink under data-density="compact" on <html>. The media query
+   keeps it off touch: compact and pointer-coarse utilities tie on specificity, so without it
+   the later rule would win and shrink touch targets below 44 px. */
+@custom-variant compact {
+  @media (pointer: fine) {
+    &:where([data-density='compact'] *) {
+      @slot;
+    }
+  }
+}
+
+/* Design tokens (see `AGENTS.md › Styling`). The generator fills the placeholders from the
+   brand: one `--token: oklch(...)` line per token for light and dark, and the radius. */
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0.03 257.4);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0.03 257.4);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0.03 257.4);
+  --primary: oklch(0.511 0.086 186.4);
+  --primary-foreground: oklch(0.985 0.004 257.4);
+  --secondary: oklch(0.97 0.009 257.4);
+  --secondary-foreground: oklch(0.205 0.03 257.4);
+  --muted: oklch(0.97 0.009 257.4);
+  --muted-foreground: oklch(0.546 0.03 257.4);
+  --accent: oklch(0.97 0.009 257.4);
+  --accent-foreground: oklch(0.205 0.03 257.4);
+  --destructive: oklch(0.577 0.235 27.3);
+  --destructive-foreground: oklch(0.985 0.004 257.4);
+  --success: oklch(0.527 0.145 150);
+  --success-foreground: oklch(0.985 0.004 257.4);
+  --warning: oklch(0.769 0.162 75);
+  --warning-foreground: oklch(0.145 0.03 257.4);
+  --info: oklch(0.546 0.137 245);
+  --info-foreground: oklch(0.985 0.004 257.4);
+  --border: oklch(0.922 0.023 257.4);
+  --input: oklch(0.668 0.03 257.4);
+  --ring: oklch(0.511 0.086 186.4);
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: oklch(0.145 0.03 257.4);
+  --foreground: oklch(0.985 0.004 257.4);
+  --card: oklch(0.205 0.03 257.4);
+  --card-foreground: oklch(0.985 0.004 257.4);
+  --popover: oklch(0.205 0.03 257.4);
+  --popover-foreground: oklch(0.985 0.004 257.4);
+  --primary: oklch(0.62 0.086 186.4);
+  --primary-foreground: oklch(0.145 0.03 257.4);
+  --secondary: oklch(0.269 0.03 257.4);
+  --secondary-foreground: oklch(0.985 0.004 257.4);
+  --muted: oklch(0.269 0.03 257.4);
+  --muted-foreground: oklch(0.708 0.03 257.4);
+  --accent: oklch(0.269 0.03 257.4);
+  --accent-foreground: oklch(0.985 0.004 257.4);
+  --destructive: oklch(0.704 0.187 22.2);
+  --destructive-foreground: oklch(0.145 0.03 257.4);
+  --success: oklch(0.696 0.17 150);
+  --success-foreground: oklch(0.145 0.03 257.4);
+  --warning: oklch(0.828 0.169 84);
+  --warning-foreground: oklch(0.145 0.03 257.4);
+  --info: oklch(0.7 0.168 245);
+  --info-foreground: oklch(0.145 0.03 257.4);
+  --border: oklch(0.3 0.03 257.4);
+  --input: oklch(0.48 0.03 257.4);
+  --ring: oklch(0.62 0.086 186.4);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans:
+    'Inter Variable', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+}

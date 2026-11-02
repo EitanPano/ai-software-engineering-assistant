@@ -1,0 +1,218 @@
+name: ai-software-engineering-assistant
+
+# Application services sit under the `app` profile, so `docker compose --profile app up --build`
+# runs the stack from the package Dockerfiles. Infrastructure services (a database, a queue)
+# have no profile, so `docker compose up -d <service>` starts one alone for local development.
+services:
+  backend:
+    # Single: the image also holds the SPA, copied from the frontend's build-only service (the
+    # Dockerfile's `spa` context; Compose 2.35.0 or later).
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    environment:
+      APP_ENV: production
+      PORT: "8000"
+      # Required in production; the backend fails fast at boot when one is missing. ${VAR-} (not
+      # ${VAR:?}, not a bare ${VAR}) so `docker compose up -d <service>` for local infrastructure needs
+      # no secrets in the shell and prints no "variable is not set" warning.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET-}
+      OTP_SECRET: ${OTP_SECRET-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY-}
+      # Single: the server is the edge, so no proxy hop is trusted; IP-keyed rate limits use the socket
+      # address. Behind a production edge set the hop count (a PaaS edge is usually 1).
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      # Comma-separated browser origins allowed by CORS. Empty keeps it off, which is right while no
+      # browser calls the API from another origin.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Host names the API answers to besides the loopback ones; a public host lists its own.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      # Scheduled jobs run on exactly one replica. The template itself runs as one instance
+      # until the cache task (the cache, rate limits and the bus live in one process).
+      JOBS_ENABLED: ${JOBS_ENABLED:-true}
+      DATABASE_URL: ${DATABASE_URL-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
+      LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
+      LLM_SIDE_MODEL: ${LLM_SIDE_MODEL:-claude-haiku-5-5}
+      # Which process this is; required in production.
+      APP_PROCESS: backend
+      # How the agent reaches the `knowledge` MCP server, and the bearer token both share. The
+      # backend does not wait for the server: an outage of it never stops the API.
+      KNOWLEDGE_MCP_URL: http://knowledge:8001/mcp
+      KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
+      # How the agent reaches the GitHub gateway (profile `github`), and the bearer token they share.
+      # Never the personal access token: only the gateway holds it. No depends_on: an outage of the
+      # GitHub half never stops the API.
+      GITHUB_MCP_URL: http://github-gateway:8002/mcp
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN-}
+    # Single, on loopback: the stack is built for local use and agent runs spend the owner's key, so
+    # nothing else on the network reaches it. With TRUST_PROXY false no caller can choose its own
+    # client IP through X-Forwarded-For. A public host changes this line (README › Hosting it
+    # publicly).
+    ports: [ "127.0.0.1:8000:8000" ]
+    profiles: [ "app" ]
+    # Without this, `up --wait` returns when the container starts, before uvicorn binds the port:
+    # it binds only after the lifespan connects every dependency. Every probe is a request-log
+    # line, so it polls fast while starting and slowly afterwards.
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=2)" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    depends_on:
+      database:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+  backend-migrate:
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    environment:
+      APP_ENV: production
+      PORT: "8000"
+      # Required in production; the backend fails fast at boot when one is missing. ${VAR-} (not
+      # ${VAR:?}, not a bare ${VAR}) so `docker compose up -d <service>` for local infrastructure needs
+      # no secrets in the shell and prints no "variable is not set" warning.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET-}
+      OTP_SECRET: ${OTP_SECRET-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY-}
+      # Single: the server is the edge, so no proxy hop is trusted; IP-keyed rate limits use the socket
+      # address. Behind a production edge set the hop count (a PaaS edge is usually 1).
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      # Comma-separated browser origins allowed by CORS. Empty keeps it off, which is right while no
+      # browser calls the API from another origin.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Scheduled jobs run on exactly one replica. The template itself runs as one instance
+      # until the cache task (the cache, rate limits and the bus live in one process).
+      JOBS_ENABLED: ${JOBS_ENABLED:-true}
+      DATABASE_URL: ${DATABASE_URL-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
+      LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}
+      LLM_SIDE_MODEL: ${LLM_SIDE_MODEL:-claude-haiku-5-5}
+      APP_PROCESS: backend
+      KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
+      GITHUB_MCP_URL: http://github-gateway:8002/mcp
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN-}
+    command: python -m app.infra.scripts.migrate
+    restart: "no"
+    profiles:
+      - app
+    depends_on:
+      database:
+        condition: service_healthy
+  knowledge:
+    # The `knowledge` MCP server: the agent's two tools, `search`, over the hybrid search, and
+    # `recall`, over a person's memories. It now reads every person's memories (the caller arrives
+    # in the request's `_meta`), not only the shared index. The backend's image and a process of
+    # its own, so its pool and its concurrency are its own. No published port: only the backend,
+    # on this network and with the bearer token, can call it.
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    command: python -m app.knowledge_main
+    environment:
+      APP_ENV: production
+      APP_PROCESS: knowledge
+      PORT: "8001"
+      # The only secrets this process reads (it holds no model key and signs nothing).
+      DATABASE_URL: ${DATABASE_URL-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
+      KNOWLEDGE_MCP_TOKEN: ${KNOWLEDGE_MCP_TOKEN-}
+    profiles: [ "app" ]
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8001/health', timeout=2)" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    depends_on:
+      database:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+  github-mcp:
+    # GitHub's own MCP server, v2.0.3, pinned by digest. Limited to the seven tools the agent is
+    # offered; lockdown withholds public content by authors without push access. It is given no
+    # token: it reads the personal access token from each request's Authorization, sent by the
+    # gateway, and stores it nowhere. Under the `github` profile only (`--profile github`).
+    image: ghcr.io/github/github-mcp-server@sha256:250bc6ce70788207608ef74cef4397230ff2e8481218da74d6093e4bd9101132
+    command: http
+    environment:
+      GITHUB_TOOLS: get_file_contents,issue_read,list_issues,pull_request_read,list_pull_requests,issue_write,add_issue_comment
+      GITHUB_LOCKDOWN_MODE: "true"
+    # Loopback only: the upstream of a gateway started by hand (`uv run poe github-gateway`), whose
+    # default GITHUB_MCP_UPSTREAM_URL is http://127.0.0.1:8082/. The Compose gateway reaches this
+    # service by name on the Compose network and does not need the port.
+    ports: [ "127.0.0.1:8082:8082" ]
+    profiles: [ "github" ]
+  github-gateway:
+    # The one process that holds the personal access token (GITHUB_MCP_PAT, from the shell or from
+    # backend/.env.github given as `docker compose --env-file backend/.env.github`). The
+    # backend's image; it checks the bearer token, adds the PAT and forwards to `github-mcp`. No
+    # published port: only the backend, on this network, can call it.
+    build:
+      context: ./backend
+      additional_contexts:
+        spa: service:frontend
+    command: python -m app.github_gateway_main
+    environment:
+      APP_ENV: production
+      APP_PROCESS: github_gateway
+      PORT: "8002"
+      GITHUB_MCP_PAT: ${GITHUB_MCP_PAT-}
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN-}
+      GITHUB_MCP_UPSTREAM_URL: http://github-mcp:8082/
+    profiles: [ "github" ]
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8002/health', timeout=2)" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+  frontend:
+    # A build-only service that the server's build reads as its spa context (Compose 2.35.0 or
+    # newer). No depends_on (the server's build waits for this one), no environment, no container.
+    build:
+      context: ./frontend
+      target: dist
+    scale: 0
+  database:
+    # The credentials are for local development only; production supplies its own DATABASE_URL.
+    # The backend gets DATABASE_URL with no default, so the bundled credentials reach it only
+    # when a developer exports a URL that points at this service. Production does not refuse
+    # that choice. This service and the backend's depends_on on it stay: the compose file is
+    # the local stack.
+    # Postgres 18.6 with pgvector 0.8.7 (tag pgvector/pgvector:0.8.7-pg18), pinned by digest.
+    image: pgvector/pgvector:0.8.7-pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    # Loopback only: the database is for local work, never reachable from the network.
+    ports: [ "127.0.0.1:5432:5432" ]
+    volumes:
+      # From Postgres 18 the image keeps PGDATA under /var/lib/postgresql/18/docker and declares
+      # the volume one level up. The Postgres 17 volume `database-data` is left as it is.
+      - database-pg18:/var/lib/postgresql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # Over TCP: the image's init phase listens on the socket only, so a socket check would
+    # report healthy before init.sql ran.
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U app -d app" ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  database-pg18: {}

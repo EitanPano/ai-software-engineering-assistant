@@ -1,0 +1,158 @@
+{
+  "format": 1,
+  "version": "unreleased",
+  "commit": null,
+  "files": {
+    ".claude/README.md": "18b26164a25600f20642e4ae0e13a6808d6278d219e158446e8596a9e61179cf",
+    ".claude/agents/backend.md": "ba679a4abdfd10f2c3b33ea726251b9247f35b2c2c84f8ffef3a61e12e5abb3e",
+    ".claude/agents/frontend.md": "2e1263ff84f35b18a2eb47cd03528e1afc81d3ad22d042c676d5d3e96f685a1c",
+    ".claude/agents/orchestrator.md": "d57d8c20d46939d4a4e854fc9f8e900e640d259561ab820430135de6002de000",
+    ".claude/agents/qa.md": "37ec4287ae57c54642de3ae69872c2c91f264c93ba775b087e1b97aa274a10c5",
+    ".claude/agents/reviewer.md": "e064e40a55d07acdb11936a13354763b9144661f14461b6ed0583c635888c44a",
+    ".claude/harness.json": "e4a93e63b88571ad7b76c814da35ac2fc34460631fca204d8661d3b889f7ee37",
+    ".claude/hooks/block-destructive-bash.mjs": "f886d7212589e495aec14aea13c48fb288f6ab998f46580b0988a72c3d64bda2",
+    ".claude/hooks/block-secret-file-access.mjs": "5d6267257756587700883091301214dd945a06058fe748f8533f9ffb63782785",
+    ".claude/hooks/enforce-agent-boundaries.mjs": "8d4eb83d56fa07056aa03c8cf8dcf3317926ac5b0928975cd5a5537cefe178c2",
+    ".claude/hooks/lib/guardrail.mjs": "6da0a099eb2bbbb87d678b91711ebb2fbded9316dcc165408e649e54d2a7ba54",
+    ".claude/rules/code-style.md": "817c2aa0430f26dc455c3a7049431854ee474c6d46619aeee28e36dde11da0e2",
+    ".claude/rules/git-workflow.md": "299d10e121de705713ea17c11a2fed783a3afc8ea595a33ce8c6978fb1c92b56",
+    ".claude/rules/naming.md": "74bce573fb83b8431f8ff43d170829977307ae1ac2ae282ce7ebfa009399f972",
+    ".claude/rules/ui-and-styling.md": "257d515fe0b72b431fc036c00c0dc99b3dae11a4b8d575c98cc9760d518021e8",
+    ".claude/settings.json": "4675977676e8727864a8754da6e3d7439216dddfcfca8716890a8cd072743cb8",
+    ".claude/skills/api-design/SKILL.md": "2284903457560b377569aeb6c2349aee222a2a13856591c179f5d1c0d51d05f1",
+    ".claude/skills/code-review/SKILL.md": "6bad2f0d1da9ded85f3f3484ff58034c4a988fc3718efea3ba732c2551c8dcd8",
+    ".claude/skills/cutting-a-release/SKILL.md": "1bffb2b2626f9a96ac6b32387bec30a4fbd170beac795131be52efe3ea4f10bc",
+    ".claude/skills/database/SKILL.md": "3f441b6ca8d63274368c581af3aa8c8c80b183f3217538f57a51402ac4b2b2f8",
+    ".claude/skills/database/data-layer-task.md": "e2b4bd86c8c2276cc7a7ee1f96d67a5a08e7d4f92161af5eaa915fe495485e79",
+    ".claude/skills/deployment/SKILL.md": "3e55b5db3c3f6057754f6a0ec23f67307cecf952f7b43a672365b7171e0f524e",
+    ".claude/skills/dev-loop/SKILL.md": "9a3f03f6635a6f6b311503d5e057d492a0acc5ad7b4fcece9bc6c819fe4da2b4",
+    ".claude/skills/error-handling/SKILL.md": "ca80cbba0806db54785fb9c779ee903c0cdda3a239bf2784fb7dd6f124367ee4",
+    ".claude/skills/ui-design/SKILL.md": "33c4aa6df520284d690d63ecd2aef3aa738d1c44766d8401c21cb5516d808474",
+    ".claude/skills/writing-plans/SKILL.md": "a32ba72a15b6000f2e46ce404298b93c2d9c247a16c4b8dd05f0344bdd7b26ae",
+    ".claude/skills/writing-plans/template.md": "2ddb9619ef93a59abe55f7117cc0053f0115f20478f9e73d5431f58912ea66fc",
+    ".claude/skills/writing-tests/SKILL.md": "f0cf327f204d3d5ea21e9a24a1d52e26f30d19082116be7992661d6a6f99f519",
+    ".cursor/rules/index.mdc": "528f93db27d8096cbe1e2071afcfb7d5933c3003c9c991a8c66536aa7e979054",
+    ".github/copilot-instructions.md": "a7be8cc8909865f6117b169355b6c636970dfbb22b0a1926e80bf841bd4bffc8",
+    ".orchestrate/README.md": "fceef10f62908545a25f5a191bc7a4d0dec7b99ebd9c038a789ba2e083f246f6",
+    "AGENTS.md": "ed1096ad5ce7c2c079478466e6e8b95322ab2026480e5fc2cd6ca6f7b133d934",
+    "CLAUDE.md": "094e283583c2625ab9ccdffa5e9a9835ea6eeaf0bfa2ff05b0aeb43f7d27fc90",
+    "scripts/harness-update.mjs": "5360b05fc578818bd6e7980f994381b3c5be42df4e53b2e975be9f911f8b9399",
+    "scripts/loop-stats.mjs": "82821188cb8531978b56459f7d48c5cb6e78c050a3fc900b7d03bf3ef87c8b4f",
+    "scripts/manifest.mjs": "89dc8f310883f396e7b6a5156883fbcb905d2aaef52fad888e70b8eed7de6265",
+    "scripts/provenance.mjs": "c232b044aa8fe74b474a5f2c5838da6911480a0dff08d03f86e96328a7a543ab",
+    "scripts/readme.mjs": "3a2f17354b221a46efe41ed2eac7aa86127c365ed480d1448a612dcd0e8d1383",
+    "scripts/verify.mjs": "1d26fe9723218d87c79863dde5d41f7e2b9b72aabd1b20ae563ca5267af5d13b",
+    "scripts/verify/checks.mjs": "0902b00f241ea7be2c454c2b4eff670fc18691ff4975756c1f60c8b324daa942",
+    "scripts/verify/git.mjs": "00b24a18abe6e732f1d9bcc2db9c0b2598aad9014d98120c18ed03b882d8c2a1",
+    "scripts/verify/glob.mjs": "52b0cdd276434fa83fc8561473b6d4c891b24a1a7ab9433e528222d8c865d294",
+    "scripts/verify/main.mjs": "c8b61202e1a4c32a3c8969398eac17674902ccacaa9b83b41c38ec8ac2c05b6d",
+    "scripts/verify/proc.mjs": "d2c8be625670e6a56e07ca571ed82685aef9b9e450dfc96f11a7ed023874fa72",
+    "scripts/verify/readme.mjs": "a5a5b0deaca79212a8b4909ec760fd47052633bbaa1a3bdf40294c29a1808dc7",
+    "scripts/verify/reap.mjs": "98836b0a8f5b00104edbf1faa0ac752a37668d125793dfc39d2d41d9f9a86f07",
+    "scripts/verify/retired.mjs": "2c58b0be7b9e7ab3e4cff4aad99d0ba48253e8565412c150c951389eda95ff07",
+    "scripts/verify/reuse.mjs": "5ff9c5813e513fc403d46df7edf01461f9e18389918f22140e5dcb1557b1e77c",
+    "scripts/verify/review.mjs": "d1b60b7f5473a322e47ecc2c5469230c0fe81c8201cb15d2ad1f1964c1b3b4e2",
+    "scripts/verify/security.mjs": "44776600549b766b9b92ab572e2a6aad62bac9fe73859874811ec0ca1abd1fa8",
+    "scripts/verify/summary.mjs": "b40ba3c30f283f82f497b5d75f9a1de62330871cfcb5fcaaefb7e4d3d3b59ac4"
+  },
+  "settings": {
+    "$schema": "https://json.schemastore.org/claude-code-settings.json",
+    "$comment": "Guardrail wiring. Claude Code only reads hook and permission config from this file; a hook script in .claude/hooks/ that is not listed here never runs. See AGENTS.md. Hooks use exec form (node + args: no shell, cwd-independent through ${CLAUDE_PROJECT_DIR}) with onFailure: block, so a hook that crashes, times out or cannot start blocks the call instead of letting it through. permissions.deny is a second, prefix-matched layer that Claude Code evaluates regardless of what the hooks return; the hooks see whole command strings and catch what a prefix cannot. MCP servers are not pre-approved: add a .mcp.json and approve it once, deliberately.",
+    "permissions": {
+      "allow": [
+        "Bash(bun install*)",
+        "Bash(bun run *)",
+        "Bash(bun test*)",
+        "Bash(bun x *)",
+        "Bash(bunx *)",
+        "Bash(uv run poe *)",
+        "Bash(uv sync*)",
+        "Bash(uv lock*)",
+        "Bash(node scripts/bootstrap.mjs*)",
+        "Bash(node scripts/verify.mjs*)",
+        "Bash(node scripts/readme.mjs*)",
+        "Bash(node scripts/loop-stats.mjs*)",
+        "Bash(git status*)",
+        "Bash(git diff*)",
+        "Bash(git log*)",
+        "Bash(git add --intent-to-add*)",
+        "Bash(docker compose up -d *)",
+        "Bash(docker compose ps*)"
+      ],
+      "deny": [
+        "Read(**/.env)",
+        "Read(**/.env.local)",
+        "Read(**/.env.development)",
+        "Read(**/.env.production)",
+        "Read(**/*.pem)",
+        "Read(**/*.key)",
+        "Read(**/id_rsa)",
+        "Read(**/id_ed25519)",
+        "Read(~/.aws/**)",
+        "Read(~/.ssh/**)",
+        "Read(~/.npmrc)",
+        "Bash(rm -rf *)",
+        "Bash(git push --force*)",
+        "Bash(git push -f*)",
+        "Bash(git reset --hard*)",
+        "Bash(*DROP TABLE*)",
+        "Bash(*DROP DATABASE*)",
+        "PowerShell(Remove-Item -Recurse*)",
+        "PowerShell(git push --force*)",
+        "PowerShell(git push -f*)",
+        "PowerShell(git reset --hard*)",
+        "PowerShell(*DROP TABLE*)",
+        "PowerShell(*DROP DATABASE*)"
+      ],
+      "ask": [
+        "Bash(node scripts/harness-update.mjs*)"
+      ]
+    },
+    "hooks": {
+      "PreToolUse": [
+        {
+          "matcher": "*",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "node",
+              "args": [
+                "${CLAUDE_PROJECT_DIR}/.claude/hooks/block-secret-file-access.mjs"
+              ],
+              "timeout": 10,
+              "onFailure": "block"
+            }
+          ]
+        },
+        {
+          "matcher": "Bash|PowerShell",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "node",
+              "args": [
+                "${CLAUDE_PROJECT_DIR}/.claude/hooks/block-destructive-bash.mjs"
+              ],
+              "timeout": 10,
+              "onFailure": "block"
+            }
+          ]
+        },
+        {
+          "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "node",
+              "args": [
+                "${CLAUDE_PROJECT_DIR}/.claude/hooks/enforce-agent-boundaries.mjs"
+              ],
+              "timeout": 10,
+              "onFailure": "block"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

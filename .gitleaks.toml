@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The harness manifest: SHA-256 hashes of its own files."
+paths = ['''^\.fullstack/harness\.json$''']
+
+[[allowlists]]
+description = "The development ENCRYPTION_KEY, base64 of 0123456789abcdef twice, which gitleaks also reports decoded. Production refuses it (tests/test_entry.py). Exact, so a real key in the same file is still caught."
+regexes = [
+  '''^MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=$''',
+  '''^0123456789abcdef0123456789abcdef$''',
+]

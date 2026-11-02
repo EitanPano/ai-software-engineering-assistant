@@ -1,0 +1,246 @@
+{
+  "description": "Labelled eval cases for https://github.com/pallets/click at tag 8.5.0 (commit 8b19813f2bfca99f1018a587a8cf54fc959f2e5d). 15 identifier questions (they name a symbol), 15 paraphrases (they share no identifier with the lines they point at) and 10 no_answer questions (the corpus cannot answer them: 5 near Click's domain, 5 far from it). An expected chunk is the lines of one definition in src/click/<name>.py, read from the installed click 8.5.0, whose <name>.py is byte-identical to the tag. `note` says why a span is the answer; the seed ignores it. Check the labels with: uv run python -m tests.check_eval_cases. Five identifier questions spell `Class.method` on purpose, as a developer types it. Full-text search reads `Context.ensure_object` as `context.ensure` & `object`, so none of the five reaches its labelled chunk through full-text search (measured on the stored corpus, 2026-10-31): read the `keyword` `identifier` recall with that in mind.",
+  "pinnedCommit": "8b19813f2bfca99f1018a587a8cf54fc959f2e5d",
+  "cases": [
+    {
+      "kind": "identifier",
+      "question": "iter_params_for_processing",
+      "note": "The function that orders parameters for processing.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 142, "endLine": 166 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "Context.ensure_object",
+      "note": "Context.ensure_object: finds the object or creates it on the innermost context.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 752, "endLine": 759 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "Context.lookup_default call parameter default_map",
+      "note": "Context.lookup_default reads default_map and calls a callable default unless call is false.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 785, "endLine": 805 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "Group.resolve_command token_normalize_func NoSuchCommand",
+      "note": "Group.resolve_command looks a subcommand up, retries with the normalised name, raises NoSuchCommand.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 2066, "endLine": 2090 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "Option.prompt_for_value",
+      "note": "Option.prompt_for_value: the prompt flow, a confirm for a boolean flag and prompt otherwise.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 3467, "endLine": 3515 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "make_pass_decorator ensure find_object",
+      "note": "decorators.make_pass_decorator builds a decorator that passes the innermost object of a type.",
+      "expectedChunks": [{ "path": "src/click/decorators.py", "startLine": 51, "endLine": 97 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "confirmation_option --yes",
+      "note": "decorators.confirmation_option adds the --yes option that prompts before continuing.",
+      "expectedChunks": [{ "path": "src/click/decorators.py", "startLine": 380, "endLine": 401 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "NoSuchOption get_close_matches possibilities",
+      "note": "exceptions.NoSuchOption keeps close matches of the unknown option name.",
+      "expectedChunks": [{ "path": "src/click/exceptions.py", "startLine": 232, "endLine": 265 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "join_options any_prefix_is_slash",
+      "note": "formatting.join_options joins option strings and reports whether any prefix is a slash.",
+      "expectedChunks": [{ "path": "src/click/formatting.py", "startLine": 302, "endLine": 320 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "_split_opt",
+      "note": "parser._split_opt splits an option string into its prefix and name.",
+      "expectedChunks": [{ "path": "src/click/parser.py", "startLine": 111, "endLine": 117 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "split_arg_string shlex",
+      "note": "shell_completion.split_arg_string splits like shlex but survives an unfinished quote.",
+      "expectedChunks": [{ "path": "src/click/shell_completion.py", "startLine": 603, "endLine": 636 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "echo_via_pager text_or_generator",
+      "note": "termui.echo_via_pager shows text through the pager.",
+      "expectedChunks": [{ "path": "src/click/termui.py", "startLine": 367, "endLine": 399 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "CliRunner.isolated_filesystem temp_dir",
+      "note": "testing.CliRunner.isolated_filesystem: a temporary working directory for a test.",
+      "expectedChunks": [{ "path": "src/click/testing.py", "startLine": 742, "endLine": 798 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "get_app_dir force_posix roaming",
+      "note": "utils.get_app_dir returns the configuration folder for an application.",
+      "expectedChunks": [{ "path": "src/click/utils.py", "startLine": 484, "endLine": 530 }]
+    },
+    {
+      "kind": "identifier",
+      "question": "format_filename shorten surrogateescape",
+      "note": "utils.format_filename makes a filename displayable, replacing invalid bytes.",
+      "expectedChunks": [{ "path": "src/click/utils.py", "startLine": 442, "endLine": 481 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Stop the whole program right away with a chosen status number",
+      "note": "Context.exit: closes the context and raises Exit with the status.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 819, "endLine": 827 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Produce a brief one line summary of what a subcommand does for the listing",
+      "note": "Command.get_short_help_str: the short help, or the long help shortened.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 1242, "endLine": 1256 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Attach a nested subcommand beneath a parent so users can reach it",
+      "note": "Group.add_command registers a command in the group's table.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 1781, "endLine": 1789 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Take a parameter's setting from shell variables, using the first one that is not blank",
+      "note": "Parameter.resolve_envvar_value returns the first non-empty environment variable.",
+      "expectedChunks": [{ "path": "src/click/core.py", "startLine": 2669, "endLine": 2712 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Ask the user a yes or no question and repeat until they answer properly",
+      "note": "termui.confirm loops until it reads yes or no.",
+      "expectedChunks": [{ "path": "src/click/termui.py", "startLine": 289, "endLine": 345 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Read one keypress straight from the terminal without waiting for the enter key",
+      "note": "termui.getchar fetches a single character from the terminal.",
+      "expectedChunks": [{ "path": "src/click/termui.py", "startLine": 947, "endLine": 974 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Hold the program until the person presses any key, unless it is not run in a terminal",
+      "note": "termui.pause waits for a key press and does nothing without a terminal.",
+      "expectedChunks": [{ "path": "src/click/termui.py", "startLine": 983, "endLine": 1014 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Open a path where a dash means the standard streams, with deferred opening and safe replacement writes",
+      "note": "utils.open_file wraps opening a file, a dash, lazy and atomic writes.",
+      "expectedChunks": [{ "path": "src/click/utils.py", "startLine": 393, "endLine": 439 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Work out which name to show users for the running application in usage output",
+      "note": "utils._detect_program_name derives the program name for help text.",
+      "expectedChunks": [{ "path": "src/click/utils.py", "startLine": 562, "endLine": 614 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Print two aligned columns of terms and their descriptions, wrapping long descriptions",
+      "note": "HelpFormatter.write_dl writes a definition list.",
+      "expectedChunks": [{ "path": "src/click/formatting.py", "startLine": 229, "endLine": 271 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Display a failed invocation message along with how to ask for assistance",
+      "note": "UsageError.show prints the usage, the help hint and the error.",
+      "expectedChunks": [{ "path": "src/click/exceptions.py", "startLine": 87, "endLine": 111 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Add a flag that asks for a secret phrase with hidden typing and re-entry to verify it",
+      "note": "decorators.password_option sets prompt, confirmation and hidden input.",
+      "expectedChunks": [{ "path": "src/click/decorators.py", "startLine": 404, "endLine": 418 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Interpret words such as yes, no, on and off as a truthy or falsy answer, rejecting anything unrecognised",
+      "note": "BoolParamType.convert maps recognised strings to a boolean or fails.",
+      "expectedChunks": [{ "path": "src/click/types.py", "startLine": 859, "endLine": 871 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Match user input against an allowed set of options after normalisation and return the original entry",
+      "note": "Choice.convert finds the original choice whose normalised form matches.",
+      "expectedChunks": [{ "path": "src/click/types.py", "startLine": 443, "endLine": 465 }]
+    },
+    {
+      "kind": "paraphrase",
+      "question": "Strip terminal colour escape sequences from a string",
+      "note": "termui.unstyle removes ANSI styling.",
+      "expectedChunks": [{ "path": "src/click/termui.py", "startLine": 768, "endLine": 777 }]
+    },
+    {
+      "kind": "no_answer",
+      "question": "How do I make a Click command run its callback as an async coroutine?",
+      "note": "Near the domain: Click has no async command support.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How does Click read option defaults from a TOML or YAML configuration file?",
+      "note": "Near the domain: default_map exists but no file loader.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How do I build a full screen text interface with scrolling panes in Click?",
+      "note": "Near the domain: Click has prompts and a pager, no full screen UI.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How does Click generate a man page from command definitions?",
+      "note": "Near the domain: Click does not generate man pages.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How do I run Click subcommands in parallel on several threads?",
+      "note": "Near the domain: Click runs one command chain, with no parallelism.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How do I configure a Postgres connection pool timeout?",
+      "note": "Far from the domain.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How do I train a neural network classifier with gradient descent?",
+      "note": "Far from the domain.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "What is the best way to bake sourdough bread at home?",
+      "note": "Far from the domain.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How do I deploy a Kubernetes ingress controller with TLS?",
+      "note": "Far from the domain.",
+      "expectedChunks": []
+    },
+    {
+      "kind": "no_answer",
+      "question": "How does a websocket server broadcast messages to every connected client?",
+      "note": "Far from the domain.",
+      "expectedChunks": []
+    }
+  ]
+}

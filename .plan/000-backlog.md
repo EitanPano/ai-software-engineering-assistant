@@ -18,8 +18,55 @@ Example: `- [ ] user can sign in with email`
 
 ## Queue
 
-<!-- empty: the bootstrap-project skill adds the first task here -->
+- [ ] agent remembers long-term knowledge across conversations
+- [ ] agent returns schema-validated structured results
+- [ ] agent reads a file from the knowledge base
+- [ ] admin can measure answer correctness with an eval run
+- [ ] a tool accepted later reaches existing conversations
+- [ ] admin can manage eval cases
+- [ ] agent runs have a spend cap
+- [ ] search has a global spend cap
+- [ ] concurrent searches are capped below the pool size
+- [ ] knowledge server connects with a read-only database role
+- [ ] the security review fires on a change to the tool gate
+- [ ] reloading a guarded route in development stays on that route | stack:frontend
+- [ ] starting a conversation is rate limited
+- [ ] starting an eval run is rate limited per admin
+- [ ] user can reset their password
+- [ ] user can delete a conversation
+- [ ] user can stop a running agent
+- [ ] a pending approval expires
+- [ ] user sees which conversations wait on an approval
+- [ ] user can say why a tool call was rejected
+- [ ] user can load earlier messages in a conversation
+- [ ] user can see a finished run's tool calls after a reload
+- [ ] admin can connect a private GitHub repository
+- [ ] admin can re-index a connected source
+- [ ] admin can remove a source
+- [ ] connect is rate limited per admin
+- [ ] agent proposes a code change as a GitHub pull request
+- [ ] each user acts on GitHub with their own token
+- [ ] admin can add and remove a third-party MCP server
+- [ ] admin reads a changed tool definition as a word diff
+- [ ] a server's listing is read past its first page
+- [ ] admin sees who accepted a listing or changed a tool policy
+- [ ] reading or accepting a server's listing is rate limited per admin
+- [ ] e2e records the real exit code when vite preview dies
 
 ## DONE
 
 <!-- moved here by the dev loop with the date and the plan number -->
+
+- [x] user can chat with the agent and watch the response stream (2026-10-30, plan 001)
+- [x] drop the reference module (2026-10-30, plan 002)
+- [x] move the database to Postgres 18 with pgvector and add grant_admin (2026-10-30, plan 003)
+- [x] admin can connect a GitHub repository to the knowledge base (2026-10-31, plan 004)
+- [x] user can search the knowledge base with hybrid search (2026-10-31, plan 005)
+- [x] search is rate limited per user (2026-10-31, plan 006)
+- [x] settled e2e test does not race its timers (2026-10-31, plan 007)
+- [x] verify keeps the web server's output when e2e fails (2026-10-31, plan 008)
+- [x] admin can measure retrieval quality with an eval run (2026-10-31, plan 009)
+- [x] agent searches the knowledge base through our MCP server (2026-11-01, plan 010)
+- [x] user approves sensitive tool calls (2026-11-01, plan 011)
+- [x] agent acts on GitHub through the GitHub MCP server (2026-11-01, plan 012)
+- [x] admin can manage MCP servers and tool policy (2026-11-02, plan 013)

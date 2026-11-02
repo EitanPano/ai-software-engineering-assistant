@@ -1,0 +1,785 @@
+import base64
+import os
+import socket
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from app.config.env import EnvError, load_env
+from app.main import uvicorn_options
+from tests.store import store_backed
+
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+LONG_VALUE = "a-production-value-of-at-least-32-characters"
+KEY = base64.b64encode(bytes([7]) * 32).decode()
+DEFAULT_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+PRODUCTION = {"APP_ENV": "production", "APP_PROCESS": "backend", "ENCRYPTION_KEY": KEY}
+PRODUCTION |= {"DATABASE_URL": "postgres://app:a-real-password@db.internal:5432/app"}
+PRODUCTION |= {
+    "JWT_ACCESS_SECRET": f"{LONG_VALUE}-1",
+    "JWT_REFRESH_SECRET": f"{LONG_VALUE}-2",
+    "OTP_SECRET": f"{LONG_VALUE}-3",
+    "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4",
+    "VOYAGE_API_KEY": f"{LONG_VALUE}-5",
+    "KNOWLEDGE_MCP_TOKEN": f"{LONG_VALUE}-6",
+}
+# What the `knowledge` process needs and nothing else.
+KNOWLEDGE_PRODUCTION = {
+    "APP_ENV": "production",
+    "APP_PROCESS": "knowledge",
+    "DATABASE_URL": PRODUCTION["DATABASE_URL"],
+    "VOYAGE_API_KEY": PRODUCTION["VOYAGE_API_KEY"],
+    "KNOWLEDGE_MCP_TOKEN": PRODUCTION["KNOWLEDGE_MCP_TOKEN"],
+}
+
+
+@store_backed
+class TestTheEntryUnderABindFailure:
+    """The process entry in a child process: it must not report success, and it must leave
+    with a non-zero code instead of lingering. The blocker is a plain wildcard listening socket,
+    so the entry's bind fails the same way on every OS.
+
+    A synchronous test: Windows' selector loop cannot run asyncio subprocesses (M4-19).
+    """
+
+    def test_exits_non_zero_names_the_port_and_never_says_listening(self) -> None:
+        # A loopback listener on a free port blocks the entry's loopback bind on Linux and on
+        # Windows alike; a wildcard blocker would not on Windows, which lets a specific address
+        # share a port with a wildcard one.
+        with socket.socket() as blocker:
+            blocker.bind(("127.0.0.1", 0))
+            blocker.listen()
+            port = int(blocker.getsockname()[1])
+            result = subprocess.run(
+                [sys.executable, "-m", "app.main"],
+                cwd=PACKAGE_ROOT,
+                env={
+                    **os.environ,
+                    "APP_ENV": "development",
+                    "PORT": str(port),
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+
+        assert result.returncode != 0
+        assert str(port) in result.stderr
+        assert "listening" not in result.stdout
+        assert "listening" not in result.stderr
+        # uvicorn logs this only after a successful bind (and runs the lifespan before it, which
+        # is why the entry has no `listening` line of its own).
+        assert "Uvicorn running" not in result.stdout
+
+
+class TestUvicornOptions:
+    """The flags both uvicorn calls share (M4-23): production silently diverges here, because
+    tests never start uvicorn."""
+
+    @pytest.mark.parametrize("reload", [False, True])
+    def test_sets_the_flags_every_call_shares(self, reload: bool) -> None:
+        options = uvicorn_options(reload=reload)
+
+        assert options["port"] == 8000
+        assert options["loop"] == "app.infra.loop:selector_loop_factory"
+        assert options["server_header"] is False
+        assert options["proxy_headers"] is False
+        assert options["access_log"] is False
+        assert options["log_config"] is None
+        # Below Docker's 10 s grace period, with the 4 s resource budget after it.
+        assert options["timeout_graceful_shutdown"] == 5
+
+    def test_reloads_the_source_directory_only_when_asked(self) -> None:
+        assert "reload" not in uvicorn_options(reload=False)
+        assert "reload_dirs" not in uvicorn_options(reload=False)
+        reloading = uvicorn_options(reload=True)
+        assert reloading.get("reload") is True
+        assert reloading.get("reload_dirs") == ["src"]
+
+    @pytest.mark.parametrize("reload", [False, True])
+    def test_binds_loopback_outside_production(
+        self, monkeypatch: pytest.MonkeyPatch, reload: bool
+    ) -> None:
+        # The signing secrets default to public values here, so anyone who could reach the port
+        # could sign a token for any account.
+        from app.config.env import env
+
+        for app_env in ("development", "test"):
+            monkeypatch.setattr("app.main.env", env.model_copy(update={"app_env": app_env}))
+            assert uvicorn_options(reload=reload)["host"] == "127.0.0.1", app_env
+
+    def test_binds_every_interface_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.config.env import env
+
+        monkeypatch.setattr("app.main.env", env.model_copy(update={"app_env": "production"}))
+        assert uvicorn_options(reload=False)["host"] == "0.0.0.0"  # noqa: S104 the container
+
+
+class TestKnowledgeEntry:
+    """`app.knowledge_main` copies `main.py`'s uvicorn flags, because nothing may import `main.py`;
+    this holds the copy equal, so production cannot drift between the two entries."""
+
+    def test_shares_every_flag_with_the_api_entry(self) -> None:
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        api = dict(uvicorn_options(reload=False))
+        knowledge = dict(knowledge_options())
+
+        assert api.keys() == knowledge.keys()
+        for name in api.keys() - {"port"}:
+            assert knowledge[name] == api[name], name
+
+    def test_binds_loopback_outside_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.config.env import env
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        for app_env in ("development", "test"):
+            monkeypatch.setattr(
+                "app.knowledge_main.env", env.model_copy(update={"app_env": app_env})
+            )
+            assert knowledge_options()["host"] == "127.0.0.1", app_env
+
+    def test_binds_every_interface_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.config.env import env
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        monkeypatch.setattr(
+            "app.knowledge_main.env", env.model_copy(update={"app_env": "production"})
+        )
+        assert knowledge_options()["host"] == "0.0.0.0"  # noqa: S104 the container's interface
+
+    def test_the_poe_task_serves_on_the_port_the_default_url_names(self) -> None:
+        import tomllib
+        from urllib.parse import urlparse
+
+        from app.config.env import load_env
+
+        tasks = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))["tool"]["poe"][
+            "tasks"
+        ]
+        task = tasks["knowledge"]
+        url = urlparse(load_env({}).env.knowledge_mcp_url)
+
+        assert task["cmd"] == "python -m app.knowledge_main"
+        assert task["env"]["PORT"] == str(url.port)
+
+    def test_has_no_reload(self) -> None:
+        from app.knowledge_main import uvicorn_options as knowledge_options
+
+        assert "reload" not in knowledge_options()
+
+
+GATEWAY_SOURCE = {
+    "APP_PROCESS": "github_gateway",
+    "GITHUB_MCP_PAT": f"{LONG_VALUE}-pat",
+    "GITHUB_MCP_TOKEN": f"{LONG_VALUE}-gateway",
+}
+GATEWAY_PRODUCTION = {"APP_ENV": "production", **GATEWAY_SOURCE}
+
+
+class TestGatewayEntry:
+    """`app.github_gateway_main` copies `main.py`'s uvicorn flags like `knowledge_main` does."""
+
+    def test_shares_every_flag_with_the_api_entry(self) -> None:
+        from app.github_gateway_main import uvicorn_options as gateway_options
+
+        api = dict(uvicorn_options(reload=False))
+        gateway = dict(gateway_options())
+
+        assert api.keys() == gateway.keys()
+        for name in api.keys() - {"port"}:
+            assert gateway[name] == api[name], name
+
+    def test_binds_loopback_outside_production_and_every_interface_in_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.config.env import env
+        from app.github_gateway_main import uvicorn_options as gateway_options
+
+        for app_env, host in (
+            ("development", "127.0.0.1"),
+            ("test", "127.0.0.1"),
+            ("production", "0.0.0.0"),  # noqa: S104 the container's interface
+        ):
+            monkeypatch.setattr(
+                "app.github_gateway_main.env", env.model_copy(update={"app_env": app_env})
+            )
+            assert gateway_options()["host"] == host, app_env
+
+    def test_the_poe_task_serves_on_port_8002_and_has_no_reload(self) -> None:
+        import tomllib
+
+        from app.github_gateway_main import uvicorn_options as gateway_options
+
+        tasks = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))["tool"]["poe"][
+            "tasks"
+        ]
+        task = tasks["github-gateway"]
+
+        assert task["cmd"] == "python -m app.github_gateway_main"
+        assert task["env"]["PORT"] == "8002"
+        assert "reload" not in gateway_options()
+
+    def test_creates_the_gateway_from_its_two_secrets(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.github_gateway_main import create_app
+        from app.services.mcp import McpApp
+
+        monkeypatch.setattr("app.github_gateway_main.env", load_env(GATEWAY_SOURCE).env)
+
+        assert isinstance(create_app(), McpApp)
+
+    def test_refuses_to_create_the_gateway_without_the_pat(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.config.env import env
+        from app.github_gateway_main import create_app
+
+        monkeypatch.setattr(
+            "app.github_gateway_main.env", env.model_copy(update={"github_mcp_pat": None})
+        )
+
+        with pytest.raises(RuntimeError, match="GITHUB_MCP_PAT"):
+            create_app()
+
+    def test_the_default_url_of_the_api_names_the_gateway_port(self) -> None:
+        from urllib.parse import urlparse
+
+        assert urlparse(load_env({}).env.github_mcp_url).port == 8002
+
+
+class TestGatewayEnv:
+    def test_the_gateway_needs_the_pat_and_the_token_in_every_environment(self) -> None:
+        for source in (GATEWAY_SOURCE, GATEWAY_PRODUCTION):
+            loaded = load_env(source)
+            assert loaded.env.app_process == "github_gateway"
+            assert loaded.env.github_mcp_pat == GATEWAY_SOURCE["GITHUB_MCP_PAT"]
+            assert loaded.env.github_mcp_token == GATEWAY_SOURCE["GITHUB_MCP_TOKEN"]
+            assert loaded.defaulted_secrets == []
+
+    @pytest.mark.parametrize("missing", ["GITHUB_MCP_PAT", "GITHUB_MCP_TOKEN"])
+    @pytest.mark.parametrize("environment", ["development", "production"])
+    def test_the_gateway_has_no_development_default_for_either_secret(
+        self, missing: str, environment: str
+    ) -> None:
+        source = {k: v for k, v in GATEWAY_SOURCE.items() if k != missing}
+
+        with pytest.raises(EnvError, match=missing):
+            load_env({**source, "APP_ENV": environment})
+
+    def test_the_gateway_reads_only_its_secrets_and_replaces_the_others(self) -> None:
+        leaked = {
+            **GATEWAY_SOURCE,
+            "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4",
+            "VOYAGE_API_KEY": f"{LONG_VALUE}-5",
+            "KNOWLEDGE_MCP_TOKEN": f"{LONG_VALUE}-6",
+            "DATABASE_URL": PRODUCTION["DATABASE_URL"],
+        }
+        env = load_env(leaked).env
+
+        assert env.anthropic_api_key != f"{LONG_VALUE}-4"
+        assert env.voyage_api_key != f"{LONG_VALUE}-5"
+        assert env.knowledge_mcp_token != f"{LONG_VALUE}-6"
+        assert env.database_url != PRODUCTION["DATABASE_URL"]
+
+    def test_the_gateway_reads_the_upstream_with_a_local_default(self) -> None:
+        assert load_env(GATEWAY_SOURCE).env.github_mcp_upstream_url == "http://127.0.0.1:8082/"
+        custom = {**GATEWAY_SOURCE, "GITHUB_MCP_UPSTREAM_URL": "http://github-mcp:8082/"}
+        assert load_env(custom).env.github_mcp_upstream_url == "http://github-mcp:8082/"
+
+    @pytest.mark.parametrize("environment", ["development", "test", "production"])
+    @pytest.mark.parametrize("name", ["GITHUB_MCP_TOKEN", "GITHUB_MCP_PAT"])
+    @pytest.mark.parametrize(
+        "placeholder",
+        [
+            f"dev-only-{LONG_VALUE}",
+            f"change-me-{LONG_VALUE}",
+            "<a random string of at least 32 characters>",
+        ],
+    )
+    def test_the_gateway_refuses_a_placeholder_in_every_environment(
+        self, environment: str, name: str, placeholder: str
+    ) -> None:
+        source = {**GATEWAY_SOURCE, "APP_ENV": environment, name: placeholder}
+
+        with pytest.raises(EnvError, match=f"{name}: is a placeholder") as raised:
+            load_env(source)
+
+        assert placeholder not in str(raised.value)
+
+    def test_the_gateway_refuses_the_pat_as_its_own_bearer_token(self) -> None:
+        shared = f"{LONG_VALUE}-one-value-for-both"
+        source = {**GATEWAY_SOURCE, "GITHUB_MCP_PAT": shared, "GITHUB_MCP_TOKEN": shared}
+
+        with pytest.raises(EnvError, match="GITHUB_MCP_TOKEN: must differ") as raised:
+            load_env(source)
+
+        assert shared not in str(raised.value)
+
+    @pytest.mark.parametrize("process", ["backend", "github_gateway"])
+    @pytest.mark.parametrize("prefix", ["ghp_", "github_pat_", "gho_", "ghu_", "ghs_"])
+    def test_a_bearer_token_shaped_like_a_github_token_is_refused_in_any_process(
+        self, process: str, prefix: str
+    ) -> None:
+        token = f"{prefix}{LONG_VALUE}"
+        source = {**GATEWAY_SOURCE, "APP_PROCESS": process, "GITHUB_MCP_TOKEN": token}
+        if process == "backend":
+            del source["GITHUB_MCP_PAT"]
+
+        with pytest.raises(EnvError, match="GITHUB_MCP_TOKEN") as raised:
+            load_env(source)
+
+        assert token not in str(raised.value)
+
+    @pytest.mark.parametrize("process", ["backend", "knowledge"])
+    @pytest.mark.parametrize("environment", ["development", "production"])
+    def test_any_other_process_refuses_to_boot_with_the_pat_and_names_no_value(
+        self, process: str, environment: str
+    ) -> None:
+        base = PRODUCTION if environment == "production" else {}
+        source = {**base, "APP_PROCESS": process, "GITHUB_MCP_PAT": "ghp_a-secret-pat-value"}
+        if process == "knowledge":
+            source |= KNOWLEDGE_PRODUCTION if environment == "production" else {}
+
+        with pytest.raises(EnvError) as raised:
+            load_env(source)
+
+        assert "GITHUB_MCP_PAT" in str(raised.value)
+        assert "ghp_a-secret-pat-value" not in str(raised.value)
+
+    def test_the_pat_is_refused_when_no_process_is_named(self) -> None:
+        with pytest.raises(EnvError, match="GITHUB_MCP_PAT"):
+            load_env({"GITHUB_MCP_PAT": "ghp_a-secret-pat-value"})
+
+    def test_a_blank_pat_is_unset(self) -> None:
+        assert load_env({"GITHUB_MCP_PAT": " "}).env.github_mcp_token is None
+
+    def test_the_api_reads_the_github_address_and_an_optional_token(self) -> None:
+        loaded = load_env({}).env
+        assert loaded.github_mcp_token is None
+        assert loaded.github_mcp_url == "http://127.0.0.1:8002/mcp"
+
+        configured = load_env(
+            {
+                "GITHUB_MCP_URL": "http://github-gateway:8002/mcp",
+                "GITHUB_MCP_TOKEN": f"{LONG_VALUE}-gateway",
+            }
+        ).env
+        assert configured.github_mcp_url == "http://github-gateway:8002/mcp"
+        assert configured.github_mcp_token == f"{LONG_VALUE}-gateway"
+        assert (
+            load_env({"GITHUB_MCP_URL": " ", "GITHUB_MCP_TOKEN": ""}).env.github_mcp_token is None
+        )
+
+    def test_the_api_refuses_a_placeholder_gateway_token_in_production(self) -> None:
+        source = {**PRODUCTION, "GITHUB_MCP_TOKEN": f"change-me-{LONG_VALUE}"}
+
+        with pytest.raises(EnvError, match="GITHUB_MCP_TOKEN: is a placeholder"):
+            load_env(source)
+
+
+class TestLoadEnv:
+    """`load_env` takes an explicit source, so these cases never read the real environment."""
+
+    def test_names_the_missing_secret_in_production(self) -> None:
+        with pytest.raises(EnvError, match="ENCRYPTION_KEY"):
+            load_env({"APP_ENV": "production"})
+
+    def test_names_the_missing_jwt_secret_in_production(self) -> None:
+        source = {name: value for name, value in PRODUCTION.items() if name != "JWT_ACCESS_SECRET"}
+
+        with pytest.raises(EnvError, match="JWT_ACCESS_SECRET"):
+            load_env(source)
+
+    def test_rejects_a_too_short_secret_in_production(self) -> None:
+        with pytest.raises(EnvError, match="OTP_SECRET"):
+            load_env({**PRODUCTION, "OTP_SECRET": "short"})
+
+    def test_does_not_echo_a_rejected_jwt_secret(self) -> None:
+        with pytest.raises(EnvError) as raised:
+            load_env({**PRODUCTION, "JWT_ACCESS_SECRET": "short-value"})
+
+        assert "short-value" not in str(raised.value)
+
+    def test_rejects_an_encryption_key_that_is_not_32_bytes_in_production(self) -> None:
+        short = base64.b64encode(bytes(16)).decode()
+
+        with pytest.raises(EnvError, match="ENCRYPTION_KEY"):
+            load_env({**PRODUCTION, "ENCRYPTION_KEY": short})
+
+    def test_rejects_an_encryption_key_that_is_not_base64(self) -> None:
+        with pytest.raises(EnvError, match="ENCRYPTION_KEY: must be base64"):
+            load_env({**PRODUCTION, "ENCRYPTION_KEY": "!" * 44})
+
+    def test_refuses_placeholder_secrets_in_production_naming_the_variable(self) -> None:
+        for placeholder in (f"change-me-{LONG_VALUE}", f"dev-only-{LONG_VALUE}", DEFAULT_KEY):
+            with pytest.raises(EnvError, match="ENCRYPTION_KEY: is a placeholder"):
+                load_env({**PRODUCTION, "ENCRYPTION_KEY": placeholder})
+
+    def test_refuses_placeholder_jwt_and_otp_secrets_in_production_naming_the_variable(
+        self,
+    ) -> None:
+        with pytest.raises(EnvError, match="OTP_SECRET: is a placeholder"):
+            load_env({**PRODUCTION, "OTP_SECRET": f"change-me-{LONG_VALUE}"})
+        with pytest.raises(EnvError, match="JWT_ACCESS_SECRET: is a placeholder"):
+            load_env({**PRODUCTION, "JWT_ACCESS_SECRET": f"dev-only-{LONG_VALUE}"})
+        with pytest.raises(EnvError, match="JWT_REFRESH_SECRET: is a placeholder"):
+            load_env(
+                {**PRODUCTION, "JWT_REFRESH_SECRET": "dev-only-refresh-secret-change-me-012345678"}
+            )
+
+    def test_refuses_one_value_for_both_jwt_secrets_in_production(self) -> None:
+        shared = PRODUCTION["JWT_ACCESS_SECRET"]
+
+        with pytest.raises(
+            EnvError, match="JWT_REFRESH_SECRET: must differ from JWT_ACCESS_SECRET"
+        ):
+            load_env({**PRODUCTION, "JWT_REFRESH_SECRET": shared})
+
+    def test_does_not_apply_the_placeholder_check_outside_production(self) -> None:
+        assert load_env({"ENCRYPTION_KEY": DEFAULT_KEY}).env.app_env == "development"
+        placeholder = {"OTP_SECRET": f"change-me-{LONG_VALUE}"}
+        assert load_env(placeholder).env.app_env == "development"
+
+    def test_requires_mail_from_when_the_mail_provider_is_not_console(self) -> None:
+        with pytest.raises(EnvError, match="MAIL_FROM"):
+            load_env({"MAIL_PROVIDER": "smtp"})
+
+        loaded = load_env({"MAIL_PROVIDER": "smtp", "MAIL_FROM": "a@b.co"})
+
+        assert loaded.env.mail_provider == "smtp"
+        assert loaded.env.mail_from == "a@b.co"
+
+    def test_defaults_the_sender_address_when_the_provider_is_console(self) -> None:
+        assert load_env({}).env.mail_from == "no-reply@example.com"
+
+    def test_returns_no_defaulted_secret_when_production_supplies_all_of_them(self) -> None:
+        loaded = load_env(PRODUCTION)
+
+        assert loaded.defaulted_secrets == []
+        assert loaded.env.encryption_key == KEY
+        assert loaded.env.jwt_access_secret == f"{LONG_VALUE}-1"
+        assert loaded.env.app_env == "production"
+
+    def test_falls_back_to_development_defaults_and_names_each_secret_it_defaulted(self) -> None:
+        loaded = load_env({})
+
+        assert loaded.defaulted_secrets == [
+            "JWT_ACCESS_SECRET",
+            "JWT_REFRESH_SECRET",
+            "OTP_SECRET",
+            "ENCRYPTION_KEY",
+            "DATABASE_URL",
+            "ANTHROPIC_API_KEY",
+            "VOYAGE_API_KEY",
+            "KNOWLEDGE_MCP_TOKEN",
+        ]
+        assert loaded.env.app_env == "development"
+        assert loaded.env.port == 8000
+        assert loaded.env.jwt_access_secret != loaded.env.jwt_refresh_secret
+        assert len(base64.b64decode(loaded.env.encryption_key)) == 32
+
+    def test_records_only_the_secrets_that_fell_back(self) -> None:
+        loaded = load_env({"OTP_SECRET": f"{LONG_VALUE}-3"})
+
+        assert loaded.defaulted_secrets == [
+            "JWT_ACCESS_SECRET",
+            "JWT_REFRESH_SECRET",
+            "ENCRYPTION_KEY",
+            "DATABASE_URL",
+            "ANTHROPIC_API_KEY",
+            "VOYAGE_API_KEY",
+            "KNOWLEDGE_MCP_TOKEN",
+        ]
+
+    def test_requires_the_voyage_key_in_production_and_refuses_the_development_default(
+        self,
+    ) -> None:
+        with pytest.raises(EnvError, match="VOYAGE_API_KEY"):
+            load_env({**PRODUCTION, "VOYAGE_API_KEY": ""})
+        with pytest.raises(EnvError, match="VOYAGE_API_KEY: is a placeholder"):
+            load_env({**PRODUCTION, "VOYAGE_API_KEY": "dev-only-voyage-key-not-real"})
+
+        assert load_env(PRODUCTION).env.voyage_api_key == f"{LONG_VALUE}-5"
+        assert load_env({}).env.voyage_api_key == "dev-only-voyage-key-not-real"
+
+    def test_refuses_the_github_and_voyage_base_urls_in_production_only(self) -> None:
+        """V06: both `*_BASE_URL` variables are refused in production."""
+        for name in ("GITHUB_BASE_URL", "VOYAGE_BASE_URL"):
+            url = {name: "http://127.0.0.1:8102"}
+
+            with pytest.raises(EnvError, match=f"{name}: is not allowed in production"):
+                load_env({**PRODUCTION, **url})
+            assert load_env(url).env is not None
+            assert load_env({**PRODUCTION, name: ""}).env.app_env == "production"
+
+        loaded = load_env({"GITHUB_BASE_URL": "http://127.0.0.1:8102"})
+        assert loaded.env.github_base_url == "http://127.0.0.1:8102"
+        assert loaded.env.voyage_base_url is None
+        assert load_env({}).env.github_base_url is None
+
+    def test_requires_the_anthropic_key_in_production_and_refuses_the_development_default(
+        self,
+    ) -> None:
+        with pytest.raises(EnvError, match="ANTHROPIC_API_KEY"):
+            load_env({**PRODUCTION, "ANTHROPIC_API_KEY": ""})
+        with pytest.raises(EnvError, match="ANTHROPIC_API_KEY: is a placeholder"):
+            load_env({**PRODUCTION, "ANTHROPIC_API_KEY": "dev-only-anthropic-key-not-real"})
+
+        loaded = load_env({**PRODUCTION, "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4"})
+        assert loaded.env.anthropic_api_key == f"{LONG_VALUE}-4"
+
+    def test_defaults_the_anthropic_key_and_model_outside_production(self) -> None:
+        loaded = load_env({})
+
+        assert "ANTHROPIC_API_KEY" in loaded.defaulted_secrets
+        assert loaded.env.llm_model == "claude-opus-5-5"
+        assert loaded.env.llm_side_model == "claude-haiku-5-5"
+        assert loaded.env.anthropic_base_url is None
+
+    def test_refuses_a_base_url_for_the_model_api_in_production_only(self) -> None:
+        url = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8101", "ANTHROPIC_API_KEY": LONG_VALUE}
+
+        with pytest.raises(EnvError, match="ANTHROPIC_BASE_URL: is not allowed in production"):
+            load_env({**PRODUCTION, **url})
+        assert load_env(url).env.anthropic_base_url == "http://127.0.0.1:8101"
+        assert (
+            load_env({**PRODUCTION, **url, "ANTHROPIC_BASE_URL": ""}).env.anthropic_base_url is None
+        )
+
+    def test_requires_the_database_url_in_production_and_names_it(self) -> None:
+        source = {name: value for name, value in PRODUCTION.items() if name != "DATABASE_URL"}
+
+        with pytest.raises(EnvError, match="DATABASE_URL"):
+            load_env(source)
+
+    def test_treats_the_empty_string_compose_passes_for_an_unset_database_url_as_missing(
+        self,
+    ) -> None:
+        with pytest.raises(EnvError, match="DATABASE_URL"):
+            load_env({**PRODUCTION, "DATABASE_URL": ""})
+        loaded = load_env({"APP_ENV": "development", "DATABASE_URL": ""})
+
+        assert "DATABASE_URL" in loaded.defaulted_secrets
+
+    def test_rejects_a_url_that_is_not_a_postgres_one_without_echoing_it(self) -> None:
+        with pytest.raises(EnvError, match="DATABASE_URL: must be a postgres") as raised:
+            load_env({**PRODUCTION, "DATABASE_URL": "mysql://app:hunter2@db.internal/app"})
+
+        assert "hunter2" not in str(raised.value)
+
+    def test_accepts_the_postgresql_scheme_and_refuses_the_local_default_in_production(
+        self,
+    ) -> None:
+        url = "postgresql://app:a-real-password@db.internal:5432/app"
+
+        assert load_env({**PRODUCTION, "DATABASE_URL": url}).env.database_url == url
+        with pytest.raises(EnvError, match="DATABASE_URL: is a placeholder"):
+            load_env({**PRODUCTION, "DATABASE_URL": "postgres://app:app@127.0.0.1:5432/app"})
+
+    def test_defaults_the_database_url_to_the_local_service_outside_production(self) -> None:
+        assert load_env({}).env.database_url == "postgres://app:app@127.0.0.1:5432/app"
+
+    def test_treats_the_empty_string_compose_passes_for_an_unset_secret_as_missing(self) -> None:
+        with pytest.raises(EnvError, match="ENCRYPTION_KEY"):
+            load_env({**PRODUCTION, "ENCRYPTION_KEY": ""})
+        secrets = load_env({"APP_ENV": "development", "ENCRYPTION_KEY": ""}).defaulted_secrets
+        expected = ["ENCRYPTION_KEY"]
+        expected[:0] = ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "OTP_SECRET"]
+        expected.extend(
+            ["DATABASE_URL", "ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "KNOWLEDGE_MCP_TOKEN"]
+        )
+        assert secrets == expected
+
+    def test_reads_the_port_and_refuses_one_that_is_not_a_port(self) -> None:
+        assert load_env({"PORT": "9000"}).env.port == 9000
+        for bad in ("0", "-1", "abc", "70000", "1.5"):
+            with pytest.raises(EnvError, match="PORT"):
+                load_env({"PORT": bad})
+
+    def test_refuses_an_unknown_app_env(self) -> None:
+        with pytest.raises(EnvError, match="APP_ENV"):
+            load_env({"APP_ENV": "staging"})
+
+    def test_parses_trust_proxy_as_a_boolean_a_number_or_a_string(self) -> None:
+        assert load_env({}).env.trust_proxy is False
+        assert load_env({"TRUST_PROXY": "true"}).env.trust_proxy is True
+        assert load_env({"TRUST_PROXY": "false"}).env.trust_proxy is False
+        one = load_env({"TRUST_PROXY": "1"}).env.trust_proxy
+        assert one == 1
+        assert type(one) is int
+        zero = load_env({"TRUST_PROXY": "0"}).env.trust_proxy
+        assert zero == 0
+        assert type(zero) is int
+        assert load_env({"TRUST_PROXY": "10.0.0.1"}).env.trust_proxy == "10.0.0.1"
+
+    def test_treats_a_blank_trust_proxy_as_unset(self) -> None:
+        assert load_env({"TRUST_PROXY": ""}).env.trust_proxy is False
+        assert load_env({"TRUST_PROXY": "  "}).env.trust_proxy is False
+
+    def test_does_not_read_unicode_digits_as_a_hop_count(self) -> None:
+        arabic_one = chr(0x0661)  # `str.isdigit` accepts it; a hop count must not
+        with pytest.raises(EnvError, match="TRUST_PROXY"):
+            load_env({"TRUST_PROXY": arabic_one})
+
+    def test_splits_cors_origins_trimmed_and_leaves_it_none_when_unset(self) -> None:
+        assert load_env({"CORS_ORIGINS": "a, b,,"}).env.cors_origins == ("a", "b")
+        assert load_env({}).env.cors_origins is None
+
+    def test_treats_a_blank_cors_origins_as_unset(self) -> None:
+        assert load_env({"CORS_ORIGINS": ""}).env.cors_origins is None
+        assert load_env({"CORS_ORIGINS": "   "}).env.cors_origins is None
+
+    def test_leaves_static_dir_none_when_unset_or_blank_and_resolves_it(self) -> None:
+        assert load_env({}).env.static_dir is None
+        assert load_env({"STATIC_DIR": ""}).env.static_dir is None
+        assert load_env({"STATIC_DIR": "   "}).env.static_dir is None
+        assert load_env({"STATIC_DIR": "dist"}).env.static_dir == Path("dist").resolve()
+
+    def test_refuses_a_production_static_dir_without_an_index_html_and_names_it(
+        self, tmp_path: Path
+    ) -> None:
+        message = r"invalid environment: STATIC_DIR: .* has no index\.html"
+        with pytest.raises(EnvError, match=message):
+            load_env({**PRODUCTION, "STATIC_DIR": str(tmp_path)})
+        with pytest.raises(EnvError, match="STATIC_DIR"):
+            load_env({**PRODUCTION, "STATIC_DIR": str(tmp_path / "missing")})
+        # A directory named index.html is not the file.
+        (tmp_path / "index.html").mkdir()
+        with pytest.raises(EnvError, match="STATIC_DIR"):
+            load_env({**PRODUCTION, "STATIC_DIR": str(tmp_path)})
+
+    def test_accepts_a_production_static_dir_with_an_index_html_and_a_missing_one_elsewhere(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "index.html").write_text("<title>spa</title>")
+        production = load_env({**PRODUCTION, "STATIC_DIR": str(tmp_path)})
+        assert production.env.static_dir == tmp_path.resolve()
+        missing = tmp_path / "missing"
+        assert load_env({"STATIC_DIR": str(missing)}).env.static_dir == missing.resolve()
+
+    def test_refuses_a_trust_proxy_entry_that_is_not_an_address_a_range_or_a_preset(self) -> None:
+        """Fail fast, as bun-express does at boot: the message names the variable and the entry."""
+        for bad in ("banana", "10.0.0.0/33", "loopback, banana"):
+            with pytest.raises(EnvError, match="TRUST_PROXY: entry"):
+                load_env({"TRUST_PROXY": bad})
+
+    def test_accepts_every_trust_proxy_form_the_proxy_middleware_does(self) -> None:
+        for good in ("loopback, 10.0.0.0/8", "linklocal", "uniquelocal", "2001:db8::/32"):
+            assert load_env({"TRUST_PROXY": good}).env.trust_proxy == good
+
+    def test_treats_a_blank_cookie_domain_as_unset(self) -> None:
+        assert load_env({"COOKIE_DOMAIN": ""}).env.cookie_domain is None
+        assert load_env({"COOKIE_DOMAIN": " "}).env.cookie_domain is None
+        assert load_env({"COOKIE_DOMAIN": " x "}).env.cookie_domain == "x"
+        assert load_env({}).env.cookie_domain is None
+
+    def test_parses_jobs_enabled_as_a_boolean_true_by_default(self) -> None:
+        assert load_env({}).env.jobs_enabled is True
+        assert load_env({"JOBS_ENABLED": "false"}).env.jobs_enabled is False
+        for bad in ("maybe", "1", "yes", "True"):
+            with pytest.raises(EnvError, match="JOBS_ENABLED"):
+                load_env({"JOBS_ENABLED": bad})
+
+    def test_reads_rate_limit_scale_as_a_number_of_one_or_more_defaulting_to_one(self) -> None:
+        assert load_env({}).env.rate_limit_scale == 1
+        assert load_env({"RATE_LIMIT_SCALE": "25"}).env.rate_limit_scale == 25
+        assert load_env({"RATE_LIMIT_SCALE": "1.5"}).env.rate_limit_scale == 1.5
+        assert load_env({"RATE_LIMIT_SCALE": "1000"}).env.rate_limit_scale == 1000
+
+    def test_keeps_the_default_rate_limit_scale_in_production(self) -> None:
+        assert load_env(PRODUCTION).env.rate_limit_scale == 1
+
+    def test_refuses_a_rate_limit_scale_below_one_or_not_finite_naming_the_variable(self) -> None:
+        for bad in ("0", "0.5", "-3", "abc", "inf", "nan", "", "1001", "1e300"):
+            with pytest.raises(EnvError, match="RATE_LIMIT_SCALE"):
+                load_env({"RATE_LIMIT_SCALE": bad})
+
+    def test_requires_the_knowledge_token_in_production_and_refuses_the_development_default(
+        self,
+    ) -> None:
+        without = {k: v for k, v in PRODUCTION.items() if k != "KNOWLEDGE_MCP_TOKEN"}
+
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN"):
+            load_env(without)
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN: is a placeholder"):
+            load_env({**PRODUCTION, "KNOWLEDGE_MCP_TOKEN": f"dev-only-{LONG_VALUE}"})
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN"):
+            load_env({**PRODUCTION, "KNOWLEDGE_MCP_TOKEN": "short"})
+        assert load_env(PRODUCTION).env.knowledge_mcp_token == f"{LONG_VALUE}-6"
+        assert "KNOWLEDGE_MCP_TOKEN" in load_env({}).defaulted_secrets
+
+    def test_reads_the_knowledge_url_with_a_local_default_and_a_blank_as_unset(self) -> None:
+        default = load_env({}).env.knowledge_mcp_url
+
+        assert default == "http://127.0.0.1:8001/mcp"
+        assert load_env(
+            {"KNOWLEDGE_MCP_URL": "http://knowledge:8001/mcp"}
+        ).env.knowledge_mcp_url == ("http://knowledge:8001/mcp")
+        assert load_env({"KNOWLEDGE_MCP_URL": " "}).env.knowledge_mcp_url == default
+
+    def test_requires_the_process_in_production_only(self) -> None:
+        without = {k: v for k, v in PRODUCTION.items() if k != "APP_PROCESS"}
+
+        with pytest.raises(EnvError, match="APP_PROCESS: is required in production"):
+            load_env(without)
+        with pytest.raises(EnvError, match="APP_PROCESS"):
+            load_env({**PRODUCTION, "APP_PROCESS": "worker"})
+        with pytest.raises(EnvError, match="APP_PROCESS: is required in production"):
+            load_env({**PRODUCTION, "APP_PROCESS": ""})
+        assert load_env({}).env.app_process == "backend"
+        assert load_env(PRODUCTION).env.app_process == "backend"
+
+    def test_the_knowledge_process_needs_only_its_three_secrets(self) -> None:
+        loaded = load_env(KNOWLEDGE_PRODUCTION)
+
+        assert loaded.env.app_process == "knowledge"
+        assert loaded.defaulted_secrets == []
+        assert loaded.env.voyage_api_key == KNOWLEDGE_PRODUCTION["VOYAGE_API_KEY"]
+        assert loaded.env.knowledge_mcp_token == KNOWLEDGE_PRODUCTION["KNOWLEDGE_MCP_TOKEN"]
+
+    @pytest.mark.parametrize("missing", ["DATABASE_URL", "VOYAGE_API_KEY", "KNOWLEDGE_MCP_TOKEN"])
+    def test_the_knowledge_process_fails_naming_a_missing_secret(self, missing: str) -> None:
+        source = {k: v for k, v in KNOWLEDGE_PRODUCTION.items() if k != missing}
+
+        with pytest.raises(EnvError, match=missing):
+            load_env(source)
+
+    def test_the_knowledge_process_refuses_a_placeholder_token(self) -> None:
+        source = {**KNOWLEDGE_PRODUCTION, "KNOWLEDGE_MCP_TOKEN": f"change-me-{LONG_VALUE}"}
+
+        with pytest.raises(EnvError, match="KNOWLEDGE_MCP_TOKEN: is a placeholder"):
+            load_env(source)
+
+    def test_the_knowledge_process_fills_the_other_secrets_with_per_boot_random_values(
+        self,
+    ) -> None:
+        first = load_env(KNOWLEDGE_PRODUCTION).env
+        second = load_env(KNOWLEDGE_PRODUCTION).env
+
+        assert first.jwt_access_secret != second.jwt_access_secret
+        assert first.jwt_access_secret != first.jwt_refresh_secret
+        assert len(base64.b64decode(first.encryption_key)) == 32
+        assert first.anthropic_api_key != second.anthropic_api_key
+        # A key exported by mistake is replaced: this process never holds the model key.
+        leaked = {**KNOWLEDGE_PRODUCTION, "ANTHROPIC_API_KEY": f"{LONG_VALUE}-4"}
+        assert load_env(leaked).env.anthropic_api_key != f"{LONG_VALUE}-4"
+
+    def test_names_every_problem_at_once(self) -> None:
+        with pytest.raises(EnvError) as raised:
+            load_env({"PORT": "x", "JOBS_ENABLED": "maybe"})
+
+        assert "PORT" in str(raised.value)
+        assert "JOBS_ENABLED" in str(raised.value)
+        assert str(raised.value).startswith("invalid environment: ")
+
+    def test_does_not_echo_a_rejected_secret(self) -> None:
+        with pytest.raises(EnvError) as raised:
+            load_env({**PRODUCTION, "ENCRYPTION_KEY": "super-secret-value-not-base64!"})
+
+        assert "super-secret-value" not in str(raised.value)
